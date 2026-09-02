@@ -77,6 +77,39 @@ def push_checkpoint(path: Path, repo: str, public: bool) -> None:
               f"{type(exc).__name__}: {exc}", flush=True)
 
 
+def load_split(path: Path, smoke: bool):
+    """Load training rows from either a packed dataset or the builder's output.
+
+    Packing to parquet embeds the audio, which duplicates ~13 GB on a disk that
+    is already tight and takes a slow pass to produce. Training does not need
+    it: the builder's ``metadata.jsonl`` plus its FLACs is already a complete,
+    directly readable dataset. Packing stays worthwhile for pushing a
+    self-contained copy to the Hub, so both layouts are accepted here.
+    """
+    from datasets import Dataset, load_from_disk
+
+    meta = path / "metadata.jsonl"
+    if meta.exists():
+        # Raw builder output. Reuse the packer's reader so the dedup, torn-line
+        # and orphan-audio handling is identical in both paths.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.pack_dataset import read_rows, split_by_source
+
+        rows = read_rows(meta)
+        train, _ = split_by_source(rows, 0.02)
+        for r in train:
+            r["audio"] = str(path / r["file_name"])
+        ds = Dataset.from_list(train)
+    else:
+        loaded = load_from_disk(str(path))
+        ds = loaded["train"] if "train" in loaded else loaded
+
+    from datasets import Audio
+
+    ds = ds.cast_column("audio", Audio(sampling_rate=None))
+    return ds.select(range(min(len(ds), 16))) if smoke else ds
+
+
 def main() -> int:
     args = build_argparser().parse_args()
     if args.smoke:
@@ -95,10 +128,7 @@ def main() -> int:
         load_backbone,
     )
 
-    ds = load_from_disk(str(args.data))
-    train = ds["train"] if "train" in ds else ds
-    if args.smoke:
-        train = train.select(range(min(len(train), 16)))
+    train = load_split(args.data, args.smoke)
     print(f"train examples: {len(train)}", flush=True)
 
     backbone = load_backbone(args.device)
