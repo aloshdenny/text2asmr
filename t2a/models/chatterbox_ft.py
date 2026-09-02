@@ -250,6 +250,7 @@ class ChatterboxFinetuner:
             self.opt, lambda s: min(1.0, (s + 1) / max(self.warmup, 1))
         )
         self._micro = 0
+        self.oom_skips = 0
 
     def _forward_loss(self, batch: dict):
         """Weighted loss for one batch, without touching gradients."""
@@ -283,12 +284,24 @@ class ChatterboxFinetuner:
             return float(self._forward_loss(batch).detach())
 
     def step(self, batch: dict | None, accumulate: bool = False) -> float:
-        """One micro-batch. Returns the loss, or nan for a skipped batch."""
+        """One micro-batch. Returns the loss, or nan for a skipped batch.
+
+        Sequence lengths vary a lot across batches, so an occasional long batch
+        can spike allocation past the card's headroom -- especially while the
+        GPU is shared. Rather than let that kill a multi-hour run, an OOM drops
+        just that batch and continues.
+        """
         if batch is None:
             return float("nan")
 
-        loss = self._forward_loss(batch)
-        loss.backward()
+        try:
+            loss = self._forward_loss(batch)
+            loss.backward()
+        except torch.OutOfMemoryError:
+            self.opt.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            self.oom_skips += 1
+            return float("nan")
         if not accumulate:
             torch.nn.utils.clip_grad_norm_(
                 [p for p in self.t3.parameters() if p.requires_grad], 1.0
@@ -298,8 +311,47 @@ class ChatterboxFinetuner:
             self.opt.zero_grad(set_to_none=True)
         return float(loss.detach())
 
-    def save(self, path: Path) -> None:
+    def save(self, path: Path, step: int = 0) -> None:
+        """Write the adapter plus enough state to resume.
+
+        Saving only the adapter means a restart resumes with a fresh optimiser
+        and a reset LR schedule, which discards Adam moments and re-runs
+        warmup. On a box that restarts this often, optimiser state is worth the
+        extra file.
+        """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         self.t3.tfmr.save_pretrained(str(path))
-        print(f"  saved adapter -> {path}")
+        torch.save(
+            {
+                "step": step,
+                "optimizer": self.opt.state_dict(),
+                "scheduler": self.sched.state_dict(),
+                "oom_skips": self.oom_skips,
+            },
+            path / "trainer_state.pt",
+        )
+        print(f"  saved adapter + trainer state -> {path}", flush=True)
+
+    def resume(self, path: Path) -> int:
+        """Restore adapter and optimiser from a checkpoint. Returns the step."""
+        from peft import set_peft_model_state_dict
+        from safetensors.torch import load_file
+
+        path = Path(path)
+        adapter = path / "adapter_model.safetensors"
+        if adapter.exists():
+            set_peft_model_state_dict(self.t3.tfmr, load_file(str(adapter)))
+
+        state_path = path / "trainer_state.pt"
+        if not state_path.exists():
+            print(f"  resumed adapter only from {path} (no trainer state)")
+            return 0
+        state = torch.load(state_path, map_location=self.backbone.device,
+                           weights_only=False)
+        self.opt.load_state_dict(state["optimizer"])
+        self.sched.load_state_dict(state["scheduler"])
+        self.oom_skips = state.get("oom_skips", 0)
+        step = int(state.get("step", 0))
+        print(f"  resumed from {path} at step {step}", flush=True)
+        return step
