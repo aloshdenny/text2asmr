@@ -1,0 +1,23 @@
+[Unit]
+Description=T2A dataset build (resumable from state.json)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/t2a
+ExecStart=%h/t2a/.venv/bin/python scripts/build_datasets.py \
+    --out %h/t2a/out --trigger-hours 25 --speech-hours 120
+StandardOutput=append:%h/t2a/build.log
+StandardError=append:%h/t2a/build.log
+
+# The script checkpoints every source file to state.json and resumes from it,
+# so a restart costs only the file that was in flight. Restart on any abnormal
+# exit -- including the SIGTERM a reboot delivers -- but never after a clean
+# completion, or systemd would loop re-running a finished job forever.
+Restart=always
+RestartPreventExitStatus=0
+RestartSec=30
+
+[Install]
+WantedBy=default.target
