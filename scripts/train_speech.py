@@ -28,6 +28,8 @@ import sys
 import time
 from pathlib import Path
 
+import torch
+
 
 def build_argparser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
@@ -43,6 +45,9 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--lora-alpha", type=int, default=64)
     ap.add_argument("--max-steps", type=int, default=0, help="0 = derive from epochs")
     ap.add_argument("--save-every", type=int, default=500)
+    ap.add_argument("--eval-every", type=int, default=250)
+    ap.add_argument("--eval-batches", type=int, default=25,
+                    help="batches per eval pass; a sample, not the full split")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--smoke", action="store_true",
                     help="run a few steps on a tiny slice and exit")
@@ -88,6 +93,8 @@ def load_split(path: Path, smoke: bool):
     """
     from datasets import Dataset, load_from_disk
 
+    from datasets import Audio
+
     meta = path / "metadata.jsonl"
     if meta.exists():
         # Raw builder output. Reuse the packer's reader so the dedup, torn-line
@@ -96,18 +103,48 @@ def load_split(path: Path, smoke: bool):
         from scripts.pack_dataset import read_rows, split_by_source
 
         rows = read_rows(meta)
-        train, _ = split_by_source(rows, 0.02)
-        for r in train:
+        train_rows, eval_rows = split_by_source(rows, 0.02)
+        for r in rows:
             r["audio"] = str(path / r["file_name"])
-        ds = Dataset.from_list(train)
+        train, evl = Dataset.from_list(train_rows), Dataset.from_list(eval_rows)
     else:
         loaded = load_from_disk(str(path))
-        ds = loaded["train"] if "train" in loaded else loaded
+        train = loaded["train"] if "train" in loaded else loaded
+        evl = loaded["eval"] if "eval" in loaded else None
 
-    from datasets import Audio
+    train = train.cast_column("audio", Audio(sampling_rate=None))
+    if evl is not None and len(evl):
+        evl = evl.cast_column("audio", Audio(sampling_rate=None))
+    else:
+        evl = None
 
-    ds = ds.cast_column("audio", Audio(sampling_rate=None))
-    return ds.select(range(min(len(ds), 16))) if smoke else ds
+    if smoke:
+        train = train.select(range(min(len(train), 16)))
+        if evl is not None:
+            evl = evl.select(range(min(len(evl), 8)))
+    return train, evl
+
+
+@torch.no_grad()
+def evaluate(tuner, loader, max_batches: int) -> float:
+    """Mean loss on held-out sources.
+
+    The split is by source recording, so this measures transfer to unseen
+    speakers and rooms rather than to unseen segments of a recording the model
+    has already heard. A training loss that falls while this does not is
+    memorisation, which is the failure worth catching early in a run this long.
+    """
+    tuner.t3.eval()
+    total, n = 0.0, 0
+    for i, batch in enumerate(loader):
+        if i >= max_batches:
+            break
+        loss = tuner.loss_only(batch)
+        if loss == loss:  # skip nan from an empty batch
+            total += loss
+            n += 1
+    tuner.t3.train()
+    return total / max(n, 1)
 
 
 def main() -> int:
@@ -119,17 +156,16 @@ def main() -> int:
         args.batch = min(args.batch, 2)
         args.grad_accum = 1
 
-    import torch
-    from datasets import load_from_disk
-
     from t2a.models.chatterbox_ft import (
         ChatterboxFinetuner,
         SpeechCollator,
         load_backbone,
     )
 
-    train = load_split(args.data, args.smoke)
-    print(f"train examples: {len(train)}", flush=True)
+    train, evl = load_split(args.data, args.smoke)
+    print(f"train examples: {len(train)}"
+          f"{f', eval {len(evl)}' if evl is not None else ', no eval split'}",
+          flush=True)
 
     backbone = load_backbone(args.device)
     tuner = ChatterboxFinetuner(
@@ -154,6 +190,13 @@ def main() -> int:
         drop_last=True,
     )
 
+    eval_loader = (
+        torch.utils.data.DataLoader(
+            evl, batch_size=args.batch, shuffle=False,
+            collate_fn=collator, num_workers=0, drop_last=True,
+        ) if evl is not None and len(evl) >= args.batch else None
+    )
+
     steps = args.max_steps or int(len(loader) * args.epochs / args.grad_accum)
     print(f"training for {steps} optimiser steps "
           f"(batch {args.batch} x accum {args.grad_accum})", flush=True)
@@ -175,6 +218,11 @@ def main() -> int:
                 print(f"  step {step}/{steps}  loss {loss:.4f}  "
                       f"{rate:.2f} steps/s", flush=True)
                 history.append({"step": step, "loss": loss})
+            if eval_loader is not None and step % args.eval_every == 0:
+                ev = evaluate(tuner, eval_loader, args.eval_batches)
+                print(f"  step {step}  EVAL loss {ev:.4f}  (train {loss:.4f})",
+                      flush=True)
+                history.append({"step": step, "loss": loss, "eval_loss": ev})
             if step % args.save_every == 0 and not args.smoke:
                 ckpt = args.out / f"step-{step}"
                 tuner.save(ckpt)
