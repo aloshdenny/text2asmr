@@ -49,6 +49,9 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--log-every", type=int, default=25,
                     help="steps between loss lines; a fraction of total steps "
                          "would put the first line hours into a long run")
+    ap.add_argument("--max-consecutive-ooms", type=int, default=40,
+                    help="abort if this many batches OOM in a row; a run that "
+                         "skips everything looks healthy but learns nothing")
     ap.add_argument("--eval-batches", type=int, default=25,
                     help="batches per eval pass; a sample, not the full split")
     ap.add_argument("--device", default="cuda")
@@ -230,6 +233,17 @@ def main() -> int:
     while not done:
         for micro, batch in enumerate(loader):
             loss = tuner.step(batch, accumulate=(micro + 1) % args.grad_accum != 0)
+            if tuner.consecutive_ooms >= args.max_consecutive_ooms:
+                # Skipping every batch is not "running" -- it burns hours while
+                # reporting active and writing checkpoints that never change. Exit
+                # non-zero so systemd restarts with a clean allocator and the
+                # loop resumes from the last checkpoint.
+                print(f"  ABORT: {tuner.consecutive_ooms} consecutive OOMs; "
+                      f"exiting so the service restarts with fresh memory",
+                      flush=True)
+                if step > 0:
+                    tuner.save(args.out / f"step-{step}", step=step)
+                return 3
             if (micro + 1) % args.grad_accum:
                 continue
             step += 1

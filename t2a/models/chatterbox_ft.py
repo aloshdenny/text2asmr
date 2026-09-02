@@ -20,6 +20,7 @@ target, so the model learns the delivery rather than memorising one speaker.
 
 from __future__ import annotations
 
+import gc
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,10 @@ class SpeechCollator:
     padding out of the cross-entropy.
     """
 
-    def __init__(self, backbone, max_speech_tokens: int = 600) -> None:
+    def __init__(self, backbone, max_speech_tokens: int = 400) -> None:
+        # 400 tokens is ~16 s of speech. Only 0.3% of segments exceed that
+        # (p50 is 2.2 s, p99 12.1 s), so the cap bounds worst-case activation
+        # memory on a shared card at negligible cost in data.
         self.model = backbone
         self.tokenizer = backbone.tokenizer
         self.max_speech_tokens = max_speech_tokens
@@ -91,6 +95,7 @@ class SpeechCollator:
         try:
             return self._build(rows)
         except torch.OutOfMemoryError:
+            gc.collect()
             torch.cuda.empty_cache()
             self.oom_skips += 1
             return None
@@ -268,6 +273,7 @@ class ChatterboxFinetuner:
         )
         self._micro = 0
         self.oom_skips = 0
+        self.consecutive_ooms = 0
 
     def _forward_loss(self, batch: dict):
         """Weighted loss for one batch, without touching gradients.
@@ -328,14 +334,24 @@ class ChatterboxFinetuner:
         if batch is None:
             return float("nan")
 
+        loss = None
         try:
             loss = self._forward_loss(batch)
             loss.backward()
         except torch.OutOfMemoryError:
+            # The exception's traceback references the frames that built the
+            # failed graph, keeping its activations alive. Dropping the local
+            # and collecting before empty_cache is what actually returns the
+            # memory; without it the process ratchets up until every batch
+            # fails.
+            del loss
             self.opt.zero_grad(set_to_none=True)
+            gc.collect()
             torch.cuda.empty_cache()
             self.oom_skips += 1
+            self.consecutive_ooms += 1
             return float("nan")
+        self.consecutive_ooms = 0
         if not accumulate:
             torch.nn.utils.clip_grad_norm_(
                 [p for p in self.t3.parameters() if p.requires_grad], 1.0
