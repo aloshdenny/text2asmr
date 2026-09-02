@@ -235,7 +235,7 @@ def main() -> int:
             step += 1
             if step % args.log_every == 0 or args.smoke:
                 rate = (step - start_step) / max(time.time() - t0, 1e-9)
-                oom = tuner.oom_skips
+                oom = tuner.oom_skips + collator.oom_skips
                 print(f"  step {step}/{steps}  loss {loss:.4f}  "
                       f"{rate:.2f} steps/s"
                       f"{f'  oom_skips {oom}' if oom else ''}", flush=True)

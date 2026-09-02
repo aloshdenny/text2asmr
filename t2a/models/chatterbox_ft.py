@@ -54,6 +54,7 @@ class SpeechCollator:
         self.tokenizer = backbone.tokenizer
         self.max_speech_tokens = max_speech_tokens
         self.device = backbone.device
+        self.oom_skips = 0
 
     @staticmethod
     def _to_16k(wav: np.ndarray, src_sr: int) -> np.ndarray:
@@ -79,6 +80,22 @@ class SpeechCollator:
         return [tokens[i, : lens[i]] for i in range(len(wavs16))]
 
     def __call__(self, rows: list[dict]) -> dict[str, Any] | None:
+        """Build a batch, or None if it cannot be built.
+
+        The S3 tokenizer and voice encoder both run on the GPU, so collation
+        can OOM independently of the training step -- and it does, on batches
+        with long waveforms. That happens inside the DataLoader's fetch, so the
+        guard around forward/backward never sees it and the run dies. Returning
+        None drops the batch, which the training loop already tolerates.
+        """
+        try:
+            return self._build(rows)
+        except torch.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            self.oom_skips += 1
+            return None
+
+    def _build(self, rows: list[dict]) -> dict[str, Any] | None:
         wavs16, texts = [], []
         for row in rows:
             audio = row["audio"]
@@ -253,7 +270,13 @@ class ChatterboxFinetuner:
         self.oom_skips = 0
 
     def _forward_loss(self, batch: dict):
-        """Weighted loss for one batch, without touching gradients."""
+        """Weighted loss for one batch, without touching gradients.
+
+        Runs under bf16 autocast. T3 ships in fp32, which on this card costs
+        roughly twice the time and memory for no quality benefit at LoRA rank
+        32; bf16 needs no gradient scaler, and the LoRA parameters themselves
+        stay fp32 as autocast only casts the ops.
+        """
         from chatterbox.models.t3.modules.cond_enc import T3Cond
 
         device = self.backbone.device
@@ -263,25 +286,36 @@ class ChatterboxFinetuner:
             emotion_adv=0.5 * torch.ones(len(batch["speaker_emb"]), 1, 1,
                                          device=device),
         )
-        loss_text, loss_speech = _causal_lm_losses(
-            self.t3,
-            cond=cond,
-            text_tokens=batch["text_tokens"].to(device),
-            text_lens=batch["text_token_lens"].to(device),
-            speech_tokens=batch["speech_tokens"].to(device),
-            speech_lens=batch["speech_token_lens"].to(device),
-        )
+        with torch.autocast("cuda", dtype=torch.bfloat16,
+                            enabled=str(device).startswith("cuda")):
+            loss_text, loss_speech = _causal_lm_losses(
+                self.t3,
+                cond=cond,
+                text_tokens=batch["text_tokens"].to(device),
+                text_lens=batch["text_token_lens"].to(device),
+                speech_tokens=batch["speech_tokens"].to(device),
+                speech_lens=batch["speech_token_lens"].to(device),
+            )
         # Speech tokens carry the delivery; the text head is kept in the loss
         # at low weight only to stop the shared backbone drifting.
         return (self.speech_loss_weight * loss_speech
                 + self.text_loss_weight * loss_text)
 
     def loss_only(self, batch: dict | None) -> float:
-        """Loss without a backward pass, for evaluation."""
+        """Loss without a backward pass, for evaluation.
+
+        Guarded like the training step: an eval OOM should cost the eval
+        batch, not the run it is reporting on.
+        """
         if batch is None:
             return float("nan")
-        with torch.no_grad():
-            return float(self._forward_loss(batch).detach())
+        try:
+            with torch.no_grad():
+                return float(self._forward_loss(batch).detach())
+        except torch.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            self.oom_skips += 1
+            return float("nan")
 
     def step(self, batch: dict | None, accumulate: bool = False) -> float:
         """One micro-batch. Returns the loss, or nan for a skipped batch.
