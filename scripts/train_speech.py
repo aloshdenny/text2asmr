@@ -46,7 +46,35 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--smoke", action="store_true",
                     help="run a few steps on a tiny slice and exit")
+    ap.add_argument("--push-repo", default="",
+                    help="hub model repo to mirror checkpoints to as they are "
+                         "written; requires `hf auth login` on this machine")
+    ap.add_argument("--push-public", action="store_true",
+                    help="create the checkpoint repo public (default private)")
     return ap
+
+
+def push_checkpoint(path: Path, repo: str, public: bool) -> None:
+    """Mirror a checkpoint to the Hub, never failing the training run.
+
+    The box this trains on has died mid-job more than once, so checkpoints are
+    pushed as they are written rather than at the end. A failed push must not
+    take the run with it -- losing a backup is recoverable, losing the run is
+    not.
+    """
+    try:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        api.create_repo(repo, repo_type="model", private=not public,
+                        exist_ok=True)
+        api.upload_folder(folder_path=str(path), repo_id=repo,
+                          repo_type="model",
+                          commit_message=f"checkpoint {path.name}")
+        print(f"  pushed {path.name} -> {repo}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - backup must not kill training
+        print(f"  WARNING: push of {path.name} failed: "
+              f"{type(exc).__name__}: {exc}", flush=True)
 
 
 def main() -> int:
@@ -88,7 +116,11 @@ def main() -> int:
         batch_size=args.batch,
         shuffle=True,
         collate_fn=collator,
-        num_workers=2,
+        # Must stay 0: the collator holds the Chatterbox model and runs the S3
+        # tokenizer and voice encoder on the GPU. Worker processes would have
+        # to pickle it, which fails on s3gen's parametrized conv layers, and
+        # would be wrong anyway -- that work belongs in the main process.
+        num_workers=0,
         drop_last=True,
     )
 
@@ -114,13 +146,19 @@ def main() -> int:
                       f"{rate:.2f} steps/s", flush=True)
                 history.append({"step": step, "loss": loss})
             if step % args.save_every == 0 and not args.smoke:
-                tuner.save(args.out / f"step-{step}")
+                ckpt = args.out / f"step-{step}"
+                tuner.save(ckpt)
+                if args.push_repo:
+                    push_checkpoint(ckpt, args.push_repo, args.push_public)
             if step >= steps:
                 done = True
                 break
 
-    tuner.save(args.out / "final")
+    final = args.out / "final"
+    tuner.save(final)
     (args.out / "history.json").write_text(json.dumps(history, indent=2))
+    if args.push_repo and not args.smoke:
+        push_checkpoint(final, args.push_repo, args.push_public)
     print(f"\ndone in {(time.time() - t0)/60:.1f} min -> {args.out/'final'}")
     return 0
 
