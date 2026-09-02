@@ -270,7 +270,17 @@ def main() -> int:
                 state["per_class"][key] = used + span.duration
 
         if not args.keep_cache:
+            # hf_hub_download returns a symlink into the cache's blobs/ store.
+            # Unlinking only the symlink leaves the blob behind, which silently
+            # accumulated 15 GiB of already-processed audio before this was
+            # caught. Remove the blob it resolves to as well.
+            try:
+                blob = Path(os.path.realpath(ap_))
+            except OSError:
+                blob = None
             ap_.unlink(missing_ok=True)
+            if blob is not None and blob != ap_ and blob.exists():
+                blob.unlink(missing_ok=True)
 
         state["done"].append(fid)
         speech_meta.flush(); trig_meta.flush()
