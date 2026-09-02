@@ -46,6 +46,9 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--max-steps", type=int, default=0, help="0 = derive from epochs")
     ap.add_argument("--save-every", type=int, default=500)
     ap.add_argument("--eval-every", type=int, default=250)
+    ap.add_argument("--log-every", type=int, default=25,
+                    help="steps between loss lines; a fraction of total steps "
+                         "would put the first line hours into a long run")
     ap.add_argument("--eval-batches", type=int, default=25,
                     help="batches per eval pass; a sample, not the full split")
     ap.add_argument("--device", default="cuda")
@@ -202,10 +205,27 @@ def main() -> int:
           f"(batch {args.batch} x accum {args.grad_accum})", flush=True)
 
     args.out.mkdir(parents=True, exist_ok=True)
-    history: list[dict] = []
-    t0 = time.time()
+
+    # Resume from the newest checkpoint if one exists. The unit restarts on any
+    # abnormal exit, and without this every OOM or reboot would discard all
+    # progress since the run began.
     step = 0
-    done = False
+    if not args.smoke:
+        ckpts = sorted(args.out.glob("step-*"),
+                       key=lambda p: int(p.name.split("-")[1]))
+        if ckpts:
+            step = tuner.resume(ckpts[-1])
+
+    history: list[dict] = []
+    hist_path = args.out / "history.json"
+    if hist_path.exists():
+        try:
+            history = json.loads(hist_path.read_text())
+        except json.JSONDecodeError:
+            history = []
+    t0 = time.time()
+    start_step = step
+    done = step >= steps
 
     while not done:
         for micro, batch in enumerate(loader):
@@ -213,10 +233,12 @@ def main() -> int:
             if (micro + 1) % args.grad_accum:
                 continue
             step += 1
-            if step % max(steps // 20, 1) == 0 or args.smoke:
-                rate = step / max(time.time() - t0, 1e-9)
+            if step % args.log_every == 0 or args.smoke:
+                rate = (step - start_step) / max(time.time() - t0, 1e-9)
+                oom = tuner.oom_skips
                 print(f"  step {step}/{steps}  loss {loss:.4f}  "
-                      f"{rate:.2f} steps/s", flush=True)
+                      f"{rate:.2f} steps/s"
+                      f"{f'  oom_skips {oom}' if oom else ''}", flush=True)
                 history.append({"step": step, "loss": loss})
             if eval_loader is not None and step % args.eval_every == 0:
                 ev = evaluate(tuner, eval_loader, args.eval_batches)
@@ -225,7 +247,7 @@ def main() -> int:
                 history.append({"step": step, "loss": loss, "eval_loss": ev})
             if step % args.save_every == 0 and not args.smoke:
                 ckpt = args.out / f"step-{step}"
-                tuner.save(ckpt)
+                tuner.save(ckpt, step=step)
                 if args.push_repo:
                     push_checkpoint(ckpt, args.push_repo, args.push_public)
             if step >= steps:
@@ -233,7 +255,7 @@ def main() -> int:
                 break
 
     final = args.out / "final"
-    tuner.save(final)
+    tuner.save(final, step=step)
     (args.out / "history.json").write_text(json.dumps(history, indent=2))
     if args.push_repo and not args.smoke:
         push_checkpoint(final, args.push_repo, args.push_public)
