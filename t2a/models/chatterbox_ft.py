@@ -251,11 +251,8 @@ class ChatterboxFinetuner:
         )
         self._micro = 0
 
-    def step(self, batch: dict | None, accumulate: bool = False) -> float:
-        """One micro-batch. Returns the loss, or nan for a skipped batch."""
-        if batch is None:
-            return float("nan")
-
+    def _forward_loss(self, batch: dict):
+        """Weighted loss for one batch, without touching gradients."""
         from chatterbox.models.t3.modules.cond_enc import T3Cond
 
         device = self.backbone.device
@@ -275,9 +272,22 @@ class ChatterboxFinetuner:
         )
         # Speech tokens carry the delivery; the text head is kept in the loss
         # at low weight only to stop the shared backbone drifting.
-        loss = (self.speech_loss_weight * loss_speech
+        return (self.speech_loss_weight * loss_speech
                 + self.text_loss_weight * loss_text)
 
+    def loss_only(self, batch: dict | None) -> float:
+        """Loss without a backward pass, for evaluation."""
+        if batch is None:
+            return float("nan")
+        with torch.no_grad():
+            return float(self._forward_loss(batch).detach())
+
+    def step(self, batch: dict | None, accumulate: bool = False) -> float:
+        """One micro-batch. Returns the loss, or nan for a skipped batch."""
+        if batch is None:
+            return float("nan")
+
+        loss = self._forward_loss(batch)
         loss.backward()
         if not accumulate:
             torch.nn.utils.clip_grad_norm_(
