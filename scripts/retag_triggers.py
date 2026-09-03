@@ -89,7 +89,15 @@ def main() -> int:
             p = args.triggers_dir / r["file_name"]
             if not p.exists():
                 continue
-            stereo, sr = sf.read(p, dtype="float32", always_2d=True)
+            try:
+                stereo, sr = sf.read(p, dtype="float32", always_2d=True)
+            except Exception as exc:  # noqa: BLE001
+                # A single corrupt header (seen: a bogus frame count that
+                # overflows numpy's allocator) must not kill a run that is
+                # otherwise 87% through 20,340 clips.
+                print(f"  skip {r['file_name']}: {type(exc).__name__}: {exc}",
+                      flush=True)
+                continue
             stereo = stereo.T  # (channels, samples)
             mono = stereo.mean(axis=0) if stereo.shape[0] > 1 else stereo[0]
             mono_clips.append(mono)
