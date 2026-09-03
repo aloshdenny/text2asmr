@@ -65,10 +65,14 @@ def list_gpus(api_key: str) -> list[dict]:
 def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
     """Commands the pod runs on boot.
 
-    Written to be re-runnable and to fail loudly: every long step verifies it
+    Deliberately NOT an f-string: this text contains shell brace groups and an
+    embedded Python heredoc, both of which an f-string would try to interpret
+    as replacement fields. Substitution is explicit at the end.
+
+    Written to be re-runnable and to fail loudly -- every long step verifies it
     actually did something, because an idle pod still bills.
     """
-    return textwrap.dedent(f"""
+    script = """
     set -euo pipefail
     exec > >(tee -a /workspace/bootstrap.log) 2>&1
     echo "=== bootstrap $(date -u) ==="
@@ -77,54 +81,67 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
     apt-get update -qq && apt-get install -y -qq git ffmpeg tmux >/dev/null
 
     cd /workspace
-    [ -d text2asmr ] || git clone {repo} text2asmr
+    [ -d text2asmr ] || git clone __REPO__ text2asmr
     cd text2asmr
+    export PYTHONPATH=/workspace/text2asmr:$PYTHONPATH
 
     python -m pip install -q -U pip
-    python -m pip install -q torch --index-url https://download.pytorch.org/whl/cu121 || true
-    python -m pip install -q transformers datasets soundfile librosa huggingface_hub \
-        chatterbox-tts peft torchcodec
-
     python -c "import torch;print('torch',torch.__version__,'cuda',torch.cuda.is_available())"
 
-    # Fail fast rather than train on an unauthenticated shell.
-    python - <<'PY'
-    import os, sys
-    from huggingface_hub import whoami
-    if not os.environ.get("{hf_token_env}"):
-        sys.exit("{hf_token_env} not set in pod env")
-    print("hub user:", whoami()["name"])
-    PY
+    if [ -z "${__TOKENENV__:-}" ]; then
+      echo "FATAL: __TOKENENV__ not set in pod env"; exit 1
+    fi
 
-    STAGE="{stage}"
+    STAGE="__STAGE__"
+
+    if [ "$STAGE" = "triggers" ]; then
+      echo "=== trigger model: Stable Audio Open LoRA ==="
+      python -V   # must be 3.10.x: stable-audio-tools pins <3.11
+      python -m pip install -q stable-audio-tools huggingface_hub
+
+      mkdir -p /workspace/out/triggers
+      python /workspace/text2asmr/scripts/fetch_triggers.py \
+          --out /workspace/out/triggers
+
+      export T2A_TRIGGER_METADATA=/workspace/out/triggers/metadata.jsonl
+
+      # Smoke first: prove config, captions and VRAM before committing to a
+      # run that bills for hours.
+      echo "=== smoke ==="
+      if ! python /workspace/text2asmr/scripts/train_triggers.py --smoke; then
+        echo "FATAL: trigger smoke test failed - not starting the full run"
+        exit 1
+      fi
+
+      echo "=== full trigger training ==="
+      python /workspace/text2asmr/scripts/train_triggers.py \
+          --push-repo aoxo/text2asmr-stable-audio
+    fi
 
     if [ "$STAGE" = "build" ] || [ "$STAGE" = "all" ]; then
       echo "=== rebuilding corpus from aoxo/audios ==="
-      # Watchdog: a silent no-op download is the expensive failure mode, so
-      # abort if the HF cache has not grown after five minutes.
-      ( sleep 300
-        SZ=$(du -sm ~/.cache/huggingface 2>/dev/null | cut -f1 || echo 0)
-        if [ "${{SZ:-0}}" -lt 200 ]; then
-          echo "FATAL: HF cache only ${{SZ}}MB after 5min - download is not progressing"
-          pkill -f build_datasets.py || true
-        fi
-      ) &
-      python scripts/build_datasets.py --out /workspace/out \\
+      python -m pip install -q transformers datasets soundfile librosa
+      python scripts/build_datasets.py --out /workspace/out \
           --trigger-hours 25 --speech-hours 120
-      python scripts/sync_hf.py data --out /workspace/out \\
+      python scripts/shard_upload.py --out /workspace/out \
           --repo aoxo/text2asmr-segments
     fi
 
     if [ "$STAGE" = "train" ] || [ "$STAGE" = "all" ]; then
-      echo "=== training ==="
-      python scripts/train_speech.py --data /workspace/out/speech \\
-          --out /workspace/ckpt/speech --epochs 1 --batch 4 --grad-accum 4 \\
-          --save-every 250 --eval-every 250 \\
+      echo "=== speech training ==="
+      python -m pip install -q chatterbox-tts peft datasets torchcodec
+      python scripts/train_speech.py --data /workspace/out/speech \
+          --out /workspace/ckpt/speech --epochs 1 --batch 4 --grad-accum 4 \
+          --save-every 250 --eval-every 250 \
           --push-repo aoxo/text2asmr-chatterbox
     fi
 
     echo "=== bootstrap complete $(date -u) ==="
-    """).strip()
+    """
+    script = (script.replace("__REPO__", repo)
+                    .replace("__TOKENENV__", hf_token_env)
+                    .replace("__STAGE__", stage))
+    return textwrap.dedent(script).strip()
 
 
 def create_pod(api_key: str, args, env: dict) -> dict:
@@ -157,10 +174,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--gpu", default="RTX 4090",
                     help="display name substring, e.g. 'RTX 4090', 'A6000'")
-    ap.add_argument("--stage", default="all", choices=["build", "train", "all"])
+    ap.add_argument("--stage", default="all",
+                    choices=["build", "train", "triggers", "all"])
     ap.add_argument("--name", default="t2a")
-    ap.add_argument("--image",
-                    default="runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04")
+    ap.add_argument("--image", default="",
+                    help="container image; defaults per stage (the trigger "
+                         "stage needs python 3.10 for stable-audio-tools)")
     ap.add_argument("--disk", type=int, default=200, help="volume GB")
     ap.add_argument("--container-disk", type=int, default=50)
     ap.add_argument("--cloud", default="COMMUNITY", choices=["COMMUNITY", "SECURE"])
@@ -192,6 +211,14 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
+    if not args.image:
+        args.image = (
+            "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
+            if args.stage == "triggers"
+            else "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
+        )
+        print(f"image: {args.image}")
+
     matches = [g for g in list_gpus(api_key)
                if args.gpu.lower() in g["displayName"].lower()]
     if not matches:
@@ -219,7 +246,7 @@ def main() -> int:
         "T2A_BOOTSTRAP": bootstrap_script(args.stage, "HF_TOKEN", args.repo),
     }
 
-    est = {"build": 4, "train": 10, "all": 14}[args.stage]
+    est = {"build": 4, "train": 10, "triggers": 12, "all": 14}[args.stage]
     print(f"stage={args.stage}  est ~{est}h  "
           f"~${(price or 0) * est:.2f} at ${price}/hr")
 
