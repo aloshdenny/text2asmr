@@ -177,7 +177,10 @@ def main() -> int:
         "--val-every", str(args.val_every),
         "--max-steps", str(10 if args.smoke else args.max_steps),
         "--logger", "none",
-        "--num-gpus", "1",
+        # No --num-gpus: it isn't a real train.py flag (rejected with
+        # "unrecognized arguments") despite train.py's own source referencing
+        # args.num_gpus -- that value comes from somewhere prefigure derives
+        # internally, not from the CLI. Single GPU needs no override anyway.
         "--num-nodes", "1",
         "--precision", "16-mixed",
     ]
