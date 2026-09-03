@@ -103,7 +103,7 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
     if [ "$STAGE" = "triggers" ]; then
       echo "=== trigger model: Stable Audio Open LoRA ==="
       python -V   # must be 3.10.x: stable-audio-tools pins <3.11
-      python -m pip install -q stable-audio-tools huggingface_hub
+      python -m pip install -q stable-audio-tools pytorch_lightning huggingface_hub
 
       mkdir -p /workspace/out/triggers
       python /workspace/text2asmr/scripts/fetch_triggers.py \
