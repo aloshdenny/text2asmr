@@ -89,7 +89,7 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
     cd /workspace
     [ -d text2asmr ] || git clone __REPO__ text2asmr
     cd text2asmr
-    export PYTHONPATH=/workspace/text2asmr:$PYTHONPATH
+    export PYTHONPATH=/workspace/text2asmr:${PYTHONPATH:-}
 
     python -m pip install -q -U pip
     python -c "import torch;print('torch',torch.__version__,'cuda',torch.cuda.is_available())"
