@@ -182,6 +182,13 @@ def main() -> int:
         # args.num_gpus -- that value comes from somewhere prefigure derives
         # internally, not from the CLI. Single GPU needs no override anyway.
         "--num-nodes", "1",
+        # Default is 6. The pod's cgroup caps the container at ~58GB despite
+        # the host having 503GB, and a DataLoader worker was SIGKILLed --
+        # almost certainly the same corrupt-header file that broke
+        # retag_triggers.py's allocator. Fewer workers means less simultaneous
+        # decode/prefetch memory in flight if it (or another bad file) is hit
+        # again before it's identified and removed from the corpus.
+        "--num-workers", "2",
         "--precision", "16-mixed",
     ]
     print("running:", " ".join(cmd), flush=True)
