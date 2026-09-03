@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
-data/
-reports/
-out/
+# Anchored to repo root: an unanchored "data/" also matched t2a/data/, the
+# actual source package, and silently kept it out of every commit until a
+# real `git clone` (RunPod's bootstrap) exposed the gap.
+/data/
+/reports/
+/out/
