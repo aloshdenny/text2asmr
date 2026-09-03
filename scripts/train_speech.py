@@ -79,8 +79,13 @@ def push_checkpoint(path: Path, repo: str, public: bool) -> None:
         api = HfApi()
         api.create_repo(repo, repo_type="model", private=not public,
                         exist_ok=True)
+        # PEFT's save_pretrained writes a README whose base_model frontmatter
+        # is empty (get_peft_model was applied to the Llama submodule, not a
+        # named pretrained model), which the Hub's metadata validator rejects.
+        # The adapter weights don't need the README, so skip it.
         api.upload_folder(folder_path=str(path), repo_id=repo,
                           repo_type="model",
+                          ignore_patterns=["README.md"],
                           commit_message=f"checkpoint {path.name}")
         print(f"  pushed {path.name} -> {repo}", flush=True)
     except Exception as exc:  # noqa: BLE001 - backup must not kill training
@@ -254,11 +259,13 @@ def main() -> int:
                       f"{rate:.2f} steps/s"
                       f"{f'  oom_skips {oom}' if oom else ''}", flush=True)
                 history.append({"step": step, "loss": loss})
+                hist_path.write_text(json.dumps(history, indent=2))
             if eval_loader is not None and step % args.eval_every == 0:
                 ev = evaluate(tuner, eval_loader, args.eval_batches)
                 print(f"  step {step}  EVAL loss {ev:.4f}  (train {loss:.4f})",
                       flush=True)
                 history.append({"step": step, "loss": loss, "eval_loss": ev})
+                hist_path.write_text(json.dumps(history, indent=2))
             if step % args.save_every == 0 and not args.smoke:
                 ckpt = args.out / f"step-{step}"
                 tuner.save(ckpt, step=step)
