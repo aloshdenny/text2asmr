@@ -45,21 +45,30 @@ WORK = Path("/workspace/sao")
 
 
 def fetch_train_script(work: Path) -> Path:
-    """Get train.py itself.
+    """Get train.py and the defaults.ini it requires.
 
     `pip install stable-audio-tools` installs the importable package but does
     not register train.py as a console script or module -- it is a repo-root
-    script meant to be run from a checkout. Downloading just that one file is
-    simpler than cloning the whole tools repo for one script.
+    script meant to be run from a checkout. Downloading just those two files
+    is simpler than cloning the whole tools repo for one script.
+
+    defaults.ini is not optional: prefigure's ``get_all_args()`` reads it via
+    a relative path from the process's working directory, and fails with an
+    opaque ``configparser.NoSectionError`` -> ``TypeError`` (a bug in
+    prefigure's own error handling swallows the real message) if it's
+    missing. Downloading it alongside train.py and running from this
+    directory keeps that relative path valid regardless of where the caller's
+    own CWD happens to be.
     """
     import urllib.request
 
-    dest = work / "train.py"
-    url = f"https://raw.githubusercontent.com/{TOOLS_REPO}/main/train.py"
-    urllib.request.urlretrieve(url, dest)
-    if dest.stat().st_size < 1000:
-        raise SystemExit(f"train.py fetch from {url} looks truncated")
-    return dest
+    for name in ("train.py", "defaults.ini"):
+        dest = work / name
+        url = f"https://raw.githubusercontent.com/{TOOLS_REPO}/main/{name}"
+        urllib.request.urlretrieve(url, dest)
+        if dest.stat().st_size < 20:
+            raise SystemExit(f"{name} fetch from {url} looks truncated")
+    return work / "train.py"
 
 
 def require_gated_access() -> tuple[Path, Path]:
@@ -173,7 +182,9 @@ def main() -> int:
         "--precision", "16-mixed",
     ]
     print("running:", " ".join(cmd), flush=True)
-    result = subprocess.run(cmd)
+    # cwd=WORK so prefigure finds defaults.ini via its relative-path lookup,
+    # regardless of where this script itself was invoked from.
+    result = subprocess.run(cmd, cwd=WORK)
     if result.returncode != 0:
         return result.returncode
 
