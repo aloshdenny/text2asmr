@@ -37,7 +37,14 @@ def main() -> int:
 
     for i, name in enumerate(shards, 1):
         path = Path(hf_hub_download(args.repo, name, repo_type="dataset"))
-        with tarfile.open(path) as tf:
+        # Explicit "r:" (no compression, no auto-detect): shards are always
+        # plain tars, and auto-detect mode speculatively probes bz2 first on
+        # every open regardless of content. That probe is harmless where a
+        # real _bz2 exists, but on a venv carrying the stub from the
+        # torchvision/CLAP import fix (this box), the stub's NotImplementedError
+        # isn't one of the exceptions tarfile's auto-detect catches, so it
+        # aborts instead of falling through to plain-tar reading.
+        with tarfile.open(path, "r:") as tf:
             tf.extractall(args.out)
         path.unlink(missing_ok=True)
         print(f"  [{i}/{len(shards)}] {name}", flush=True)
