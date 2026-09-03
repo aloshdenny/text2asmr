@@ -1,0 +1,12 @@
+# Dummy prompts for smoke-testing the T2A speech adapter.
+# One utterance per line. Styles drawn from what the training corpus actually
+# contains: soft-spoken greetings, personal-attention roleplay, slow pacing.
+
+Hi there, welcome back. I'm so glad you're here with me tonight.
+Just relax, let your shoulders drop, and let your mind go quiet for a while.
+Take a deep breath in, and slowly let it out. That's it, just like that.
+I'm going to take really good care of you tonight, okay?
+You've had such a long day. Let's just slow everything down.
+It's okay, you're safe here. I've got you.
+Close your eyes for me if you'd like, and just listen to my voice.
+There's no rush at all. We have all the time in the world.
