@@ -42,7 +42,13 @@ def gql(query: str, api_key: str, variables: dict | None = None) -> dict:
     req = urllib.request.Request(
         f"{GQL}?api_key={api_key}",
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # RunPod's API sits behind Cloudflare, which blocks urllib's
+            # default "Python-urllib/x.y" User-Agent as bot traffic (error
+            # 1010) regardless of the API key being valid.
+            "User-Agent": "Mozilla/5.0 (compatible; t2a-launcher/1.0)",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
