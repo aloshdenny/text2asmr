@@ -26,7 +26,6 @@ which is only knowable once the gated config is in hand -- doing that blind
 risks a shape mismatch that burns pod time to discover. Left as a follow-up
 once the first run's real throughput is measured.
 
-    python scripts/train_triggers.py --smoke
     python scripts/train_triggers.py --push-repo aoxo/text2asmr-stable-audio
 """
 
@@ -134,13 +133,26 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=5e-5)
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--accum-batches", type=int, default=2)
-    ap.add_argument("--checkpoint-every", type=int, default=500)
+    ap.add_argument("--checkpoint-every", type=int, default=100,
+                    help="low by design: a worker gets SIGKILLed by the "
+                         "pod's cgroup after tens of minutes regardless of "
+                         "num_workers (looks like an upstream memory leak in "
+                         "stable-audio-tools, not something we can fix here), "
+                         "so a restart should lose only a couple of minutes")
     ap.add_argument("--val-every", type=int, default=-1)
-    ap.add_argument("--max-steps", type=int, default=6000)
+    ap.add_argument("--max-retries", type=int, default=20,
+                    help="training resumes from the latest checkpoint after "
+                         "each crash, up to this many attempts")
     ap.add_argument("--push-repo", default="")
     ap.add_argument("--smoke", action="store_true",
-                    help="a handful of steps, to prove the config and dataset "
-                         "load correctly before a run that bills for hours")
+                    help="DOES NOT LIMIT STEP COUNT. train.py's --max-steps "
+                         "CLI arg is parsed but never passed to pl.Trainer(), "
+                         "so it is a silent no-op -- confirmed by grepping "
+                         "the actual train.py for the string, and by a "
+                         "'smoke' run that trained 677 real steps over 12 "
+                         "minutes before crashing. This flag only lowers "
+                         "batch size, as a mild memory-pressure reduction; "
+                         "it does not make a run short or cheap.")
     args = ap.parse_args()
 
     if not args.metadata_module.exists():
@@ -162,44 +174,71 @@ def main() -> int:
     )
 
     train_py = fetch_train_script(WORK)
-
     args.out.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable, str(train_py),
-        "--model-config", str(model_cfg),
-        "--dataset-config", str(dataset_cfg),
-        "--pretrained-ckpt-path", str(ckpt_path),
-        "--name", "t2a-triggers-smoke" if args.smoke else "t2a-triggers",
-        "--save-dir", str(args.out),
-        "--batch-size", str(2 if args.smoke else args.batch_size),
-        "--accum-batches", str(1 if args.smoke else args.accum_batches),
-        "--checkpoint-every", str(args.checkpoint_every),
-        "--val-every", str(args.val_every),
-        "--max-steps", str(10 if args.smoke else args.max_steps),
-        "--logger", "none",
-        # No --num-gpus: it isn't a real train.py flag (rejected with
-        # "unrecognized arguments") despite train.py's own source referencing
-        # args.num_gpus -- that value comes from somewhere prefigure derives
-        # internally, not from the CLI. Single GPU needs no override anyway.
-        "--num-nodes", "1",
-        # Default is 6. The pod's cgroup caps the container at ~58GB despite
-        # the host having 503GB, and a DataLoader worker was SIGKILLed --
-        # almost certainly the same corrupt-header file that broke
-        # retag_triggers.py's allocator. Fewer workers means less simultaneous
-        # decode/prefetch memory in flight if it (or another bad file) is hit
-        # again before it's identified and removed from the corpus.
-        "--num-workers", "1",
-        "--precision", "16-mixed",
-    ]
-    print("running:", " ".join(cmd), flush=True)
-    # cwd=WORK so prefigure finds defaults.ini via its relative-path lookup,
-    # regardless of where this script itself was invoked from.
-    result = subprocess.run(cmd, cwd=WORK)
-    if result.returncode != 0:
-        return result.returncode
+
+    def base_cmd() -> list[str]:
+        return [
+            sys.executable, str(train_py),
+            "--model-config", str(model_cfg),
+            "--dataset-config", str(dataset_cfg),
+            "--pretrained-ckpt-path", str(ckpt_path),
+            "--name", "t2a-triggers-smoke" if args.smoke else "t2a-triggers",
+            "--save-dir", str(args.out),
+            "--batch-size", str(2 if args.smoke else args.batch_size),
+            "--accum-batches", str(1 if args.smoke else args.accum_batches),
+            "--checkpoint-every", str(args.checkpoint_every),
+            "--val-every", str(args.val_every),
+            "--logger", "none",
+            # No --num-gpus: not a real train.py flag (rejected with
+            # "unrecognized arguments") despite the source referencing
+            # args.num_gpus -- prefigure derives that internally.
+            "--num-nodes", "1",
+            # 1 is the practical floor: 0 is rejected outright because
+            # stable-audio-tools hardcodes persistent_workers=True, which
+            # requires num_workers > 0. Lower counts did not stop the SIGKILL
+            # (2 died further into training than 6 did, 1 further still, all
+            # after real progress -- 677 steps at num_workers=1 before dying)
+            # so this looks like a genuine upstream memory leak, not a
+            # worker-count problem. Handled below via checkpoint + resume.
+            "--num-workers", "1",
+            "--precision", "16-mixed",
+        ]
+
+    def latest_checkpoint() -> Path | None:
+        ckpts = sorted(args.out.rglob("*.ckpt"), key=lambda p: p.stat().st_mtime)
+        return ckpts[-1] if ckpts else None
+
+    for attempt in range(1, args.max_retries + 1):
+        cmd = base_cmd()
+        resume = latest_checkpoint()
+        if resume is not None:
+            # Full Lightning trainer state (optimizer, step count), not just
+            # weights -- --pretrained-ckpt-path above stays fixed as the base
+            # model; --ckpt-path is what actually continues a run.
+            cmd += ["--ckpt-path", str(resume)]
+            print(f"attempt {attempt}: resuming from {resume}", flush=True)
+        else:
+            print(f"attempt {attempt}: starting fresh", flush=True)
+
+        print("running:", " ".join(cmd), flush=True)
+        # cwd=WORK so prefigure finds defaults.ini via its relative-path
+        # lookup, regardless of where this script itself was invoked from.
+        result = subprocess.run(cmd, cwd=WORK)
+        if result.returncode == 0:
+            break
+        print(f"attempt {attempt} exited {result.returncode}", flush=True)
+        if args.smoke:
+            # A crash on the very first attempt with no checkpoint yet means
+            # something is wrong with the config/data, not the leak -- don't
+            # burn retries on that.
+            if latest_checkpoint() is None:
+                return result.returncode
+    else:
+        print(f"gave up after {args.max_retries} attempts", flush=True)
+        return 1
 
     if args.smoke:
-        print("smoke test passed", flush=True)
+        print("smoke passed (reached a real checkpoint)", flush=True)
         return 0
 
     if args.push_repo:
