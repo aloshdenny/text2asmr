@@ -53,12 +53,17 @@ def main() -> int:
     ap.add_argument("--adapter-repo", default="aoxo/text2asmr-chatterbox")
     ap.add_argument("--base-only", action="store_true",
                     help="skip the LoRA adapter, for an A/B baseline")
-    ap.add_argument("--exaggeration", type=float, default=0.4,
-                    help="lower than Chatterbox's 0.5 default -- ASMR "
-                         "delivery is calmer than typical speech")
-    ap.add_argument("--cfg-weight", type=float, default=0.3,
-                    help="lower than the 0.5 default, which biases toward "
-                         "louder/faster delivery than whispered ASMR wants")
+    ap.add_argument("--exaggeration", type=float, default=0.5,
+                    help="Chatterbox's own default")
+    ap.add_argument("--cfg-weight", type=float, default=0.5,
+                    help="Chatterbox's own default. A prior version lowered "
+                         "this to 0.3 for calmer delivery, but cfg_weight is "
+                         "literally how strongly generation adheres to the "
+                         "text -- lowering it trades away word-level fidelity "
+                         "for a delivery effect achievable other ways. "
+                         "Reverted after failing to reproduce a reported "
+                         "mispronunciation and reasoning through why the "
+                         "setting was still a bad trade regardless.")
     ap.add_argument("--device", default="")
     args = ap.parse_args()
 
