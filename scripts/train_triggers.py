@@ -67,7 +67,62 @@ def fetch_train_script(work: Path) -> Path:
         urllib.request.urlretrieve(url, dest)
         if dest.stat().st_size < 20:
             raise SystemExit(f"{name} fetch from {url} looks truncated")
+    _patch_lora_resume(work / "train.py")
     return work / "train.py"
+
+
+def _patch_lora_resume(train_py: Path) -> None:
+    """Make train.py resumable for LoRA runs, which --ckpt-path cannot do.
+
+    A LoRA checkpoint is deliberately stripped down (stable-audio-tools' own
+    lora.md: "cleared of all default PyTorch Lightning state and replaced
+    with just the LoRA state dict and the lora_config"). Its top-level keys
+    are only {"state_dict", "lora_config"} -- confirmed by loading one
+    directly. Passing it as --ckpt-path makes Lightning try to restore full
+    trainer state and it dies immediately on
+    ``KeyError: 'pytorch-lightning_version'``, which does not exist in a
+    LoRA checkpoint at all.
+
+    The correct resume, per the same doc, is a fresh optimizer with the LoRA
+    weights loaded back in. Lightning's ``state_dict()`` is always relative to
+    the LightningModule itself, and the saved keys start with ``model.``, so
+    ``training_wrapper.load_state_dict(..., strict=False)`` is the direct,
+    correct call -- no guessing at attribute nesting required.
+
+    Patches two spots: load T2A_LORA_RESUME_PATH's state dict right after the
+    training wrapper is built, and pin ``ckpt_path=None`` on ``trainer.fit``
+    so nothing ever again tries the incompatible full-state path.
+    """
+    text = train_py.read_text()
+
+    anchor = "training_wrapper = create_training_wrapper_from_config(model_config, model)"
+    if anchor not in text:
+        raise SystemExit(f"train.py resume patch: anchor line not found -- "
+                         f"upstream file layout changed, patch needs updating")
+    injection = anchor + """
+
+    import os as _os
+    _resume = _os.environ.get("T2A_LORA_RESUME_PATH")
+    if _resume:
+        _ckpt = torch.load(_resume, map_location="cpu", weights_only=False)
+        _missing, _unexpected = training_wrapper.load_state_dict(
+            _ckpt["state_dict"], strict=False)
+        print(f"resumed LoRA weights from {_resume} "
+              f"({len(_ckpt['state_dict'])} tensors, "
+              f"{len(_unexpected)} unexpected keys ignored)")"""
+    text = text.replace(anchor, injection, 1)
+
+    fit_line = "trainer.fit(training_wrapper, train_dl, val_dl, ckpt_path=args.ckpt_path if args.ckpt_path else None)"
+    if fit_line not in text:
+        raise SystemExit("train.py resume patch: trainer.fit line not found")
+    text = text.replace(
+        fit_line,
+        # Never pass ckpt_path: no checkpoint this script ever produces is
+        # compatible with Lightning's full-state resume under LoRA.
+        "trainer.fit(training_wrapper, train_dl, val_dl, ckpt_path=None)",
+        1,
+    )
+    train_py.write_text(text)
 
 
 def require_gated_access() -> tuple[Path, Path]:
@@ -208,22 +263,29 @@ def main() -> int:
         ckpts = sorted(args.out.rglob("*.ckpt"), key=lambda p: p.stat().st_mtime)
         return ckpts[-1] if ckpts else None
 
+    import os
+
     for attempt in range(1, args.max_retries + 1):
         cmd = base_cmd()
+        env = dict(os.environ)
         resume = latest_checkpoint()
         if resume is not None:
-            # Full Lightning trainer state (optimizer, step count), not just
-            # weights -- --pretrained-ckpt-path above stays fixed as the base
-            # model; --ckpt-path is what actually continues a run.
-            cmd += ["--ckpt-path", str(resume)]
-            print(f"attempt {attempt}: resuming from {resume}", flush=True)
+            # NOT --ckpt-path: that expects full Lightning trainer state,
+            # which a LoRA checkpoint does not have (only {"state_dict",
+            # "lora_config"} -- confirmed by inspection). The patched train.py
+            # reads this env var instead and loads just the LoRA weights with
+            # a fresh optimizer, which is the documented, expected way to
+            # resume LoRA training.
+            env["T2A_LORA_RESUME_PATH"] = str(resume)
+            print(f"attempt {attempt}: resuming LoRA weights from {resume}",
+                  flush=True)
         else:
             print(f"attempt {attempt}: starting fresh", flush=True)
 
         print("running:", " ".join(cmd), flush=True)
         # cwd=WORK so prefigure finds defaults.ini via its relative-path
         # lookup, regardless of where this script itself was invoked from.
-        result = subprocess.run(cmd, cwd=WORK)
+        result = subprocess.run(cmd, cwd=WORK, env=env)
         if result.returncode == 0:
             break
         print(f"attempt {attempt} exited {result.returncode}", flush=True)
