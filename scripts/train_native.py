@@ -43,6 +43,9 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--steps", type=int, default=20000)
     ap.add_argument("--save-every", type=int, default=250)
+    ap.add_argument("--keep-last", type=int, default=3,
+                    help="checkpoints to retain; only the latest is ever "
+                         "needed for resume, older ones are deleted")
     ap.add_argument("--log-every", type=int, default=25)
     ap.add_argument("--num-workers", type=int, default=2)
     ap.add_argument("--device", default="")
@@ -124,6 +127,18 @@ def main() -> int:
         }, args.out / f"step-{step}.pt")
         size_mb = (args.out / f"step-{step}.pt").stat().st_size / 2**20
         print(f"  saved checkpoint at step {step} ({size_mb:.0f} MB)", flush=True)
+
+        # Only resume ever needs the latest checkpoint; keeping every one on
+        # a box that has repeatedly run down to single-digit GB free is a
+        # standing risk, not a feature.
+        # keep_last=0 is refused rather than silently deleting everything:
+        # lst[:-0] is lst[:0] (empty slice), which would select every file
+        # including the one just written -- the opposite of "keep".
+        if args.keep_last > 0:
+            all_ckpts = sorted(args.out.glob("step-*.pt"),
+                              key=lambda p: int(p.stem.split("-")[1]))
+            for p in all_ckpts[:-args.keep_last]:
+                p.unlink(missing_ok=True)
 
     model.train()
     step = start_step
