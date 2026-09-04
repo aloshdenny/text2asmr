@@ -104,12 +104,24 @@ def _patch_lora_resume(train_py: Path) -> None:
     import os as _os
     _resume = _os.environ.get("T2A_LORA_RESUME_PATH")
     if _resume:
+        # Verified empirically, not by reading the source: built the real
+        # model + training_wrapper on the pod and diffed state_dict() key sets
+        # against a saved checkpoint. training_wrapper and training_wrapper.diffusion
+        # both had ZERO overlap (a first attempt using those silently loaded
+        # nothing -- 0/360 tensors, no error). training_wrapper.diffusion.model
+        # matched 356/360. The checkpoint itself is
+        # get_lora_state_dict(self.diffusion.model) merged with
+        # get_lora_state_dict(self.diffusion.conditioner) (see
+        # stable_audio_tools/training/diffusion.py), so the remaining 4 are the
+        # conditioner's and get a second, separate load.
         _ckpt = torch.load(_resume, map_location="cpu", weights_only=False)
-        _missing, _unexpected = training_wrapper.load_state_dict(
-            _ckpt["state_dict"], strict=False)
-        print(f"resumed LoRA weights from {_resume} "
-              f"({len(_ckpt['state_dict'])} tensors, "
-              f"{len(_unexpected)} unexpected keys ignored)")"""
+        _sd = _ckpt["state_dict"]
+        _m1, _u1 = training_wrapper.diffusion.model.load_state_dict(_sd, strict=False)
+        _m2, _u2 = training_wrapper.diffusion.conditioner.load_state_dict(_sd, strict=False)
+        _loaded = len(_sd) - len(set(_u1) & set(_u2))
+        print(f"resumed LoRA weights from {_resume}: "
+              f"{_loaded}/{len(_sd)} tensors matched "
+              f"(model {len(_sd)-len(_u1)}, conditioner {len(_sd)-len(_u2)})")"""
     text = text.replace(anchor, injection, 1)
 
     fit_line = "trainer.fit(training_wrapper, train_dl, val_dl, ckpt_path=args.ckpt_path if args.ckpt_path else None)"
