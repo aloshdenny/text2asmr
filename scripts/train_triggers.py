@@ -188,7 +188,7 @@ def main() -> int:
         # retag_triggers.py's allocator. Fewer workers means less simultaneous
         # decode/prefetch memory in flight if it (or another bad file) is hit
         # again before it's identified and removed from the corpus.
-        "--num-workers", "0",
+        "--num-workers", "1",
         "--precision", "16-mixed",
     ]
     print("running:", " ".join(cmd), flush=True)
