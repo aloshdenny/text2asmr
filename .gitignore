@@ -1,8 +1,17 @@
 __pycache__/
 *.pyc
+.DS_Store
+.pytest_cache/
 # Anchored to repo root: an unanchored "data/" also matched t2a/data/, the
 # actual source package, and silently kept it out of every commit until a
 # real `git clone` (RunPod's bootstrap) exposed the gap.
 /data/
 /reports/
 /out/
+# Checkpoints and generated samples are large, regenerable binaries -- not
+# source, don't belong versioned in git.
+/ckpt/
+/inference/out/
+/inference/out_ab/
+/inference/out_measure/
+/inference/out_smoke/
