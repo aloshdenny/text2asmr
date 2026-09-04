@@ -97,21 +97,33 @@ def main() -> int:
     start_step = 0
     if ckpts:
         state = torch.load(ckpts[-1], map_location=device, weights_only=False)
-        model.load_state_dict(state["model"])
+        # strict=False: the checkpoint deliberately omits BERT's frozen
+        # weights (see save(), below), which load_state_dict would otherwise
+        # report as missing.
+        model.load_state_dict(state["model"], strict=False)
         opt.load_state_dict(state["optimizer"])
         start_step = state["step"]
         print(f"resumed from {ckpts[-1]} at step {start_step}", flush=True)
 
     def save(step: int) -> None:
+        # Trainable params only: a full model.state_dict() includes BERT's
+        # frozen 109M weights, unchanged since load, in every single
+        # checkpoint -- 502MB measured for a 5.37M-param trainable model.
+        # save_every=250 over a real run would fill a nearly-full disk within
+        # a few thousand steps. BERT is reloaded from its own pretrained
+        # weights on resume, not from this file.
+        trainable = {k: v for k, v in model.state_dict().items()
+                    if "conditioning.bert." not in k}
         torch.save({
-            "model": model.state_dict(),
+            "model": trainable,
             "optimizer": opt.state_dict(),
             "step": step,
             "channels": channels,
             "cond_dim": args.cond_dim,
             "window_s": args.window_s,
         }, args.out / f"step-{step}.pt")
-        print(f"  saved checkpoint at step {step}", flush=True)
+        size_mb = (args.out / f"step-{step}.pt").stat().st_size / 2**20
+        print(f"  saved checkpoint at step {step} ({size_mb:.0f} MB)", flush=True)
 
     model.train()
     step = start_step
@@ -147,7 +159,11 @@ def main() -> int:
         if step % args.save_every == 0:
             save(step)
 
-    save(step)
+    if step % args.save_every != 0:
+        # Only if the loop didn't already save exactly this step -- avoids
+        # writing the same checkpoint twice when steps is a multiple of
+        # save_every, which it is by default.
+        save(step)
     print(f"\ndone at step {step} -> {args.out}")
     return 0
 
