@@ -129,9 +129,25 @@ def _patch_lora_resume(train_py: Path) -> None:
         raise SystemExit("train.py resume patch: trainer.fit line not found")
     text = text.replace(
         fit_line,
-        # Never pass ckpt_path: no checkpoint this script ever produces is
-        # compatible with Lightning's full-state resume under LoRA.
-        "trainer.fit(training_wrapper, train_dl, val_dl, ckpt_path=None)",
+        # Every restart previously began counting from global_step=0, since
+        # ckpt_path=None means Lightning's own step counter is never restored
+        # -- only the LoRA weights are. That silently erased all progress
+        # past whatever step each crash happened to land on: ModelCheckpoint's
+        # every_n_train_steps and its filename both key off trainer.global_step,
+        # so every run re-produced the SAME "epoch=0-step=500.ckpt" name
+        # (hence the "-v2" Lightning appended -- multiple independent runs
+        # each locally recomputed step 500) while never really advancing.
+        # trainer.global_step is a read-only property; the real counter is
+        # nested at epoch_loop.automatic_optimization.optim_progress
+        # .optimizer.step.total.completed (verified directly against this
+        # exact stable-audio-tools PyTorch Lightning 2.6.5 install -- setting
+        # it moves trainer.global_step immediately, before any training runs).
+        "_resume_step = int(_os.environ.get(\"TEXT2ASMR_LORA_RESUME_STEP\", \"0\"))\n"
+        "    if _resume_step:\n"
+        "        trainer.fit_loop.epoch_loop.automatic_optimization.optim_progress"
+        ".optimizer.step.total.completed = _resume_step\n"
+        "        print(f\"restored global_step to {trainer.global_step}\")\n"
+        "    trainer.fit(training_wrapper, train_dl, val_dl, ckpt_path=None)",
         1,
     )
     train_py.write_text(text)
@@ -281,6 +297,7 @@ def main() -> int:
         return ckpts[-1] if ckpts else None
 
     import os
+    import re
 
     for attempt in range(1, args.max_retries + 1):
         cmd = base_cmd()
@@ -294,7 +311,18 @@ def main() -> int:
             # a fresh optimizer, which is the documented, expected way to
             # resume LoRA training.
             env["TEXT2ASMR_LORA_RESUME_PATH"] = str(resume)
-            print(f"attempt {attempt}: resuming LoRA weights from {resume}",
+            # Lightning's checkpoint filename embeds the step it was saved
+            # at (e.g. "epoch=0-step=500-v2.ckpt"); the LoRA checkpoint
+            # itself carries no step of its own (just {"state_dict",
+            # "lora_config"}, confirmed by inspection), so this filename is
+            # the only record of how far training actually got. Without
+            # restoring it, every restart's global_step silently resets to
+            # 0 and re-treads the same first ~500 steps forever.
+            step_match = re.search(r"step=(\d+)", resume.name)
+            if step_match:
+                env["TEXT2ASMR_LORA_RESUME_STEP"] = step_match.group(1)
+            print(f"attempt {attempt}: resuming LoRA weights from {resume} "
+                  f"(step {step_match.group(1) if step_match else 'unknown'})",
                   flush=True)
         else:
             print(f"attempt {attempt}: starting fresh", flush=True)
