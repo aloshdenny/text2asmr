@@ -11,7 +11,7 @@ paper's conditioning vocabulary -- dropping it would make `[mild]` and
 `[vigorous]` indistinguishable to the model.
 
 Point the dataset config's ``custom_metadata_module`` at this file. The
-metadata path is taken from T2A_TRIGGER_METADATA if set, otherwise assumed to
+metadata path is taken from TEXT2ASMR_TRIGGER_METADATA if set, otherwise assumed to
 sit beside the audio directory.
 """
 
@@ -29,10 +29,10 @@ _FALLBACK = "ASMR trigger sound, close-mic binaural, no speech"
 
 
 def _metadata_path() -> Path:
-    env = os.environ.get("T2A_TRIGGER_METADATA")
+    env = os.environ.get("TEXT2ASMR_TRIGGER_METADATA")
     if env:
         return Path(env)
-    audio_dir = os.environ.get("T2A_TRIGGER_DIR", "/workspace/out/triggers")
+    audio_dir = os.environ.get("TEXT2ASMR_TRIGGER_DIR", "/workspace/out/triggers")
     return Path(audio_dir) / "metadata.jsonl"
 
 

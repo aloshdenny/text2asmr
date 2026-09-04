@@ -20,7 +20,7 @@ distribution, not a verbatim transcript -- the join silence stands in for
 whatever was cut. If you need the actual trigger audio preserved in the gap,
 that is a different pipeline (interleaving speech+trigger spans), not this.
 
-    python scripts/concat_speech.py --out ~/t2a/out --target-s 15 --max-s 20
+    python scripts/concat_speech.py --out ~/text2asmr/out --target-s 15 --max-s 20
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from pathlib import Path
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", type=Path, default=Path.home() / "t2a/out")
+    ap.add_argument("--out", type=Path, default=Path.home() / "text2asmr/out")
     ap.add_argument("--dest-name", default="speech_long",
                     help="output subdir under --out")
     ap.add_argument("--target-s", type=float, default=15.0,

@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from t2a.compose.grammar import parse, survey_vocabulary  # noqa: E402
+from text2asmr.compose.grammar import parse, survey_vocabulary  # noqa: E402
 
 REPO = "aoxo/text2asmr-uncensored"
 

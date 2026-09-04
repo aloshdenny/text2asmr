@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 
 GQL = "https://api.runpod.io/graphql"
-STATE = Path.home() / ".cache" / "t2a-runpod-watch.json"
+STATE = Path.home() / ".cache" / "text2asmr-runpod-watch.json"
 
 
 def gql(query: str, api_key: str) -> dict:

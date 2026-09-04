@@ -20,8 +20,8 @@ Safety properties that matter here:
     segment would put clips from the same recording -- often the same speaker,
     seconds apart -- on both sides, and the eval number would be meaningless.
 
-    python scripts/pack_dataset.py --out ~/t2a/out --dest ~/t2a/packed
-    python scripts/pack_dataset.py --out ~/t2a/out --dest ~/t2a/packed \
+    python scripts/pack_dataset.py --out ~/text2asmr/out --dest ~/text2asmr/packed
+    python scripts/pack_dataset.py --out ~/text2asmr/out --dest ~/text2asmr/packed \
         --push aoxo/text2asmr-speech --private
 """
 

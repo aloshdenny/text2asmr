@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from t2a.data.segment import (
+from text2asmr.data.segment import (
     MAX_SPEECH_S,
     MIN_TRIGGER_S,
     Span,

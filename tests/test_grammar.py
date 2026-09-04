@@ -1,4 +1,4 @@
-from t2a.compose.grammar import (
+from text2asmr.compose.grammar import (
     DEFAULT_INTENSITY,
     INTENSITIES,
     Speech,

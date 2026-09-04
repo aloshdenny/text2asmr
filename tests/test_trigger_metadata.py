@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from t2a.data import trigger_metadata as tm
+from text2asmr.data import trigger_metadata as tm
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def _reset(monkeypatch, tmp_path):
          "intensity": "soft", "caption": "ASMR soft brushing, close-mic binaural, no speech"},
         "not json",
     ][:2]) + "\nnot json\n")
-    monkeypatch.setenv("T2A_TRIGGER_METADATA", str(meta))
+    monkeypatch.setenv("TEXT2ASMR_TRIGGER_METADATA", str(meta))
     yield
     tm._CAPTIONS = None
 
@@ -60,5 +60,5 @@ def test_torn_metadata_lines_are_skipped():
 
 def test_missing_metadata_file_falls_back(monkeypatch, tmp_path):
     tm._CAPTIONS = None
-    monkeypatch.setenv("T2A_TRIGGER_METADATA", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("TEXT2ASMR_TRIGGER_METADATA", str(tmp_path / "absent.jsonl"))
     assert tm.get_custom_metadata({"relpath": "x.flac"}, None)["prompt"] == tm._FALLBACK

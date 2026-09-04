@@ -12,8 +12,8 @@ against the current, larger probe set, and adds a spatial descriptor
 Writes a new metadata.jsonl rather than overwriting in place, so the original
 tags are never destroyed by a bad re-tagging run.
 
-    python scripts/retag_triggers.py --triggers-dir ~/t2a/out/triggers \
-        --out ~/t2a/out/triggers/metadata_v2.jsonl
+    python scripts/retag_triggers.py --triggers-dir ~/text2asmr/out/triggers \
+        --out ~/text2asmr/out/triggers/metadata_v2.jsonl
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def main() -> int:
     import soundfile as sf
     import torch
 
-    from t2a.data.ontology import MARGIN, all_probes, spatial_descriptor
+    from text2asmr.data.ontology import MARGIN, all_probes, spatial_descriptor
 
     device = args.device or (
         "mps" if torch.backends.mps.is_available()

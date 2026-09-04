@@ -14,7 +14,7 @@ shard rather than a second copy of the corpus.
 Resumable: shards already present in the repo are skipped, so an interrupted
 run costs at most the shard in flight.
 
-    python scripts/shard_upload.py --out ~/t2a/out --repo aoxo/text2asmr-segments
+    python scripts/shard_upload.py --out ~/text2asmr/out --repo aoxo/text2asmr-segments
 """
 
 from __future__ import annotations
@@ -53,11 +53,11 @@ def read_names(meta: Path) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", type=Path, default=Path.home() / "t2a/out")
+    ap.add_argument("--out", type=Path, default=Path.home() / "text2asmr/out")
     ap.add_argument("--repo", required=True)
     ap.add_argument("--shard-mb", type=int, default=200)
     ap.add_argument("--kinds", default="speech,triggers")
-    ap.add_argument("--work", type=Path, default=Path("/tmp/t2a-shards"))
+    ap.add_argument("--work", type=Path, default=Path("/tmp/text2asmr-shards"))
     args = ap.parse_args()
 
     from huggingface_hub import HfApi
