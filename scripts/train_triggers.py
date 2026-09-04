@@ -40,7 +40,7 @@ from pathlib import Path
 
 BASE_REPO = "stabilityai/stable-audio-open-1.0"
 TOOLS_REPO = "Stability-AI/stable-audio-tools"
-WORK = Path("/workspace/sao")
+# Default matches RunPod's layout; overridden via --work-dir for other hosts.
 
 
 def fetch_train_script(work: Path) -> Path:
@@ -195,6 +195,11 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=Path("/workspace/ckpt/triggers"))
     ap.add_argument("--metadata-module", type=Path,
                     default=Path("/workspace/text2asmr/text2asmr/data/trigger_metadata.py"))
+    ap.add_argument("--work-dir", type=Path, default=Path("/workspace/sao"),
+                    help="scratch dir for the fetched train.py, defaults.ini "
+                         "and generated configs. Was a hardcoded module-level "
+                         "constant until a run on a host without a writable "
+                         "/workspace hit PermissionError trying to create it.")
     ap.add_argument("--lora-rank", type=int, default=16)
     ap.add_argument("--lora-alpha", type=int, default=16)
     ap.add_argument("--lr", type=float, default=5e-5)
@@ -234,13 +239,13 @@ def main() -> int:
     cfg_path, ckpt_path = require_gated_access()
     print("access OK", flush=True)
 
-    WORK.mkdir(parents=True, exist_ok=True)
+    args.work_dir.mkdir(parents=True, exist_ok=True)
     model_cfg, dataset_cfg = build_configs(
-        cfg_path, WORK, args.lora_rank, args.lora_alpha, args.lr,
+        cfg_path, args.work_dir, args.lora_rank, args.lora_alpha, args.lr,
         args.triggers_dir, args.metadata_module,
     )
 
-    train_py = fetch_train_script(WORK)
+    train_py = fetch_train_script(args.work_dir)
     args.out.mkdir(parents=True, exist_ok=True)
 
     def base_cmd() -> list[str]:
@@ -295,9 +300,9 @@ def main() -> int:
             print(f"attempt {attempt}: starting fresh", flush=True)
 
         print("running:", " ".join(cmd), flush=True)
-        # cwd=WORK so prefigure finds defaults.ini via its relative-path
+        # cwd=args.work_dir so prefigure finds defaults.ini via its relative-path
         # lookup, regardless of where this script itself was invoked from.
-        result = subprocess.run(cmd, cwd=WORK, env=env)
+        result = subprocess.run(cmd, cwd=args.work_dir, env=env)
         if result.returncode == 0:
             break
         print(f"attempt {attempt} exited {result.returncode}", flush=True)
