@@ -25,6 +25,20 @@ from torch.utils.data import Dataset
 
 SR = 22050
 
+# ASMR audio is deliberately quiet -- measured std ~0.03-0.045 across the
+# corpus, roughly 20-30x below the ~unit variance the DDPM's linear beta
+# schedule (1e-4 to 0.02, tuned for [-1,1]-normalized image pixels) implicitly
+# assumes for x0. Left unscaled, the forward process's noise term dominates
+# x_t for nearly the whole trajectory, so the model can hit a low
+# epsilon-prediction MSE by learning to output plausible noise without ever
+# reconstructing real structure -- consistent with training loss looking fine
+# while sampled output is pure static. Scaling up by a fixed constant (not
+# per-clip peak normalization, which would erase genuine relative loudness
+# cues like "breathing heavy" vs "soft breathing") brings x0 into the range
+# the schedule was actually designed for; sample_native.py divides back down
+# by the same constant before writing audio out.
+AUDIO_SCALE = 16.0
+
 
 def read_metadata(meta_path: Path) -> list[dict]:
     """Defensive JSONL read: torn last lines and bad rows are dropped, not fatal.
@@ -86,7 +100,7 @@ class T2ANativeDataset(Dataset):
             import librosa
 
             audio = librosa.resample(audio, orig_sr=sr, target_sr=SR)
-        return audio
+        return np.clip(audio * AUDIO_SCALE, -1.0, 1.0)
 
     def _fit_window(self, audio: np.ndarray) -> np.ndarray:
         n = len(audio)

@@ -30,7 +30,7 @@ def main() -> int:
     from transformers import BertTokenizer
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from text2asmr.native.dataset import SR
+    from text2asmr.native.dataset import AUDIO_SCALE, SR
     from text2asmr.native.diffusion import DDPM
     from text2asmr.native.model import T2ANative
 
@@ -60,7 +60,10 @@ def main() -> int:
           flush=True)
 
     sample = ddpm.sample(model, (1, 1, window), input_ids, attention_mask, device)
-    audio = sample.squeeze().detach().cpu().numpy()
+    # Training scales x0 up by AUDIO_SCALE to match the DDPM schedule's
+    # implicit unit-variance assumption (see dataset.py); undo it here so
+    # sampled output is back at real ASMR amplitude, not 16x too loud.
+    audio = (sample.squeeze().detach().cpu().numpy() / AUDIO_SCALE)
 
     print(f"stats: min={audio.min():.3f} max={audio.max():.3f} "
           f"std={audio.std():.4f} (near-zero std means degenerate output)")
