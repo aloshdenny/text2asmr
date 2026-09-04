@@ -15,10 +15,10 @@ voices from YouTube ASMR creators, so a public default would be the wrong way
 round; opening one up should be a deliberate act.
 
     # one-shot backup of the built segments
-    python scripts/sync_hf.py data --out ~/t2a/out --repo aoxo/text2asmr-segments
+    python scripts/sync_hf.py data --out ~/text2asmr/out --repo aoxo/text2asmr-segments
 
     # push a training checkpoint
-    python scripts/sync_hf.py ckpt --path ~/t2a/ckpt/speech/step-500 \
+    python scripts/sync_hf.py ckpt --path ~/text2asmr/ckpt/speech/step-500 \
         --repo aoxo/text2asmr-chatterbox --revision step-500
 """
 
@@ -142,7 +142,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("data", help="back up built segments")
-    d.add_argument("--out", type=Path, default=Path.home() / "t2a/out")
+    d.add_argument("--out", type=Path, default=Path.home() / "text2asmr/out")
     d.add_argument("--repo", required=True)
     d.add_argument("--public", action="store_true")
     d.add_argument("--workers", type=int, default=8)

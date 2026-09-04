@@ -13,11 +13,11 @@ text and on a reference clip drawn from the same source recording, so the model
 learns the delivery rather than memorising one speaker.
 
     # smoke test: a handful of steps, proves the loop runs
-    python scripts/train_speech.py --data ~/t2a/packed/speech --smoke
+    python scripts/train_speech.py --data ~/text2asmr/packed/speech --smoke
 
     # real run
-    python scripts/train_speech.py --data ~/t2a/packed/speech \
-        --epochs 2 --batch 4 --out ~/t2a/ckpt/speech
+    python scripts/train_speech.py --data ~/text2asmr/packed/speech \
+        --epochs 2 --batch 4 --out ~/text2asmr/ckpt/speech
 """
 
 from __future__ import annotations
@@ -167,7 +167,7 @@ def main() -> int:
         args.batch = min(args.batch, 2)
         args.grad_accum = 1
 
-    from t2a.models.chatterbox_ft import (
+    from text2asmr.models.chatterbox_ft import (
         ChatterboxFinetuner,
         SpeechCollator,
         load_backbone,

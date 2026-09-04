@@ -89,7 +89,7 @@ def _patch_lora_resume(train_py: Path) -> None:
     ``training_wrapper.load_state_dict(..., strict=False)`` is the direct,
     correct call -- no guessing at attribute nesting required.
 
-    Patches two spots: load T2A_LORA_RESUME_PATH's state dict right after the
+    Patches two spots: load TEXT2ASMR_LORA_RESUME_PATH's state dict right after the
     training wrapper is built, and pin ``ckpt_path=None`` on ``trainer.fit``
     so nothing ever again tries the incompatible full-state path.
     """
@@ -102,7 +102,7 @@ def _patch_lora_resume(train_py: Path) -> None:
     injection = anchor + """
 
     import os as _os
-    _resume = _os.environ.get("T2A_LORA_RESUME_PATH")
+    _resume = _os.environ.get("TEXT2ASMR_LORA_RESUME_PATH")
     if _resume:
         # Verified empirically, not by reading the source: built the real
         # model + training_wrapper on the pod and diffed state_dict() key sets
@@ -194,7 +194,7 @@ def main() -> int:
                     default=Path("/workspace/out/triggers"))
     ap.add_argument("--out", type=Path, default=Path("/workspace/ckpt/triggers"))
     ap.add_argument("--metadata-module", type=Path,
-                    default=Path("/workspace/text2asmr/t2a/data/trigger_metadata.py"))
+                    default=Path("/workspace/text2asmr/text2asmr/data/trigger_metadata.py"))
     ap.add_argument("--lora-rank", type=int, default=16)
     ap.add_argument("--lora-alpha", type=int, default=16)
     ap.add_argument("--lr", type=float, default=5e-5)
@@ -249,7 +249,7 @@ def main() -> int:
             "--model-config", str(model_cfg),
             "--dataset-config", str(dataset_cfg),
             "--pretrained-ckpt-path", str(ckpt_path),
-            "--name", "t2a-triggers-smoke" if args.smoke else "t2a-triggers",
+            "--name", "text2asmr-triggers-smoke" if args.smoke else "text2asmr-triggers",
             "--save-dir", str(args.out),
             "--batch-size", str(2 if args.smoke else args.batch_size),
             "--accum-batches", str(1 if args.smoke else args.accum_batches),
@@ -288,7 +288,7 @@ def main() -> int:
             # reads this env var instead and loads just the LoRA weights with
             # a fresh optimizer, which is the documented, expected way to
             # resume LoRA training.
-            env["T2A_LORA_RESUME_PATH"] = str(resume)
+            env["TEXT2ASMR_LORA_RESUME_PATH"] = str(resume)
             print(f"attempt {attempt}: resuming LoRA weights from {resume}",
                   flush=True)
         else:

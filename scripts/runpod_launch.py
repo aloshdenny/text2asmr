@@ -47,7 +47,7 @@ def gql(query: str, api_key: str, variables: dict | None = None) -> dict:
             # RunPod's API sits behind Cloudflare, which blocks urllib's
             # default "Python-urllib/x.y" User-Agent as bot traffic (error
             # 1010) regardless of the API key being valid.
-            "User-Agent": "Mozilla/5.0 (compatible; t2a-launcher/1.0)",
+            "User-Agent": "Mozilla/5.0 (compatible; text2asmr-launcher/1.0)",
         },
     )
     try:
@@ -109,7 +109,7 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
       python /workspace/text2asmr/scripts/fetch_triggers.py \
           --out /workspace/out/triggers
 
-      export T2A_TRIGGER_METADATA=/workspace/out/triggers/metadata.jsonl
+      export TEXT2ASMR_TRIGGER_METADATA=/workspace/out/triggers/metadata.jsonl
 
       # Smoke first: prove config, captions and VRAM before committing to a
       # run that bills for hours.
@@ -182,7 +182,7 @@ def main() -> int:
                     help="display name substring, e.g. 'RTX 4090', 'A6000'")
     ap.add_argument("--stage", default="all",
                     choices=["build", "train", "triggers", "all"])
-    ap.add_argument("--name", default="t2a")
+    ap.add_argument("--name", default="text2asmr")
     ap.add_argument("--image", default="",
                     help="container image; defaults per stage (the trigger "
                          "stage needs python 3.10 for stable-audio-tools)")
@@ -249,7 +249,7 @@ def main() -> int:
         # Must be present at creation: adding the account key later does not
         # reach an already-running pod.
         "PUBLIC_KEY": args.pubkey.read_text().strip(),
-        "T2A_BOOTSTRAP": bootstrap_script(args.stage, "HF_TOKEN", args.repo),
+        "TEXT2ASMR_BOOTSTRAP": bootstrap_script(args.stage, "HF_TOKEN", args.repo),
     }
 
     est = {"build": 4, "train": 10, "triggers": 12, "all": 14}[args.stage]
@@ -258,17 +258,17 @@ def main() -> int:
 
     if args.dry_run:
         print("\n--- bootstrap that would run on the pod ---")
-        print(env["T2A_BOOTSTRAP"])
+        print(env["TEXT2ASMR_BOOTSTRAP"])
         return 0
 
     pod = create_pod(api_key, args, env)
     print(f"\npod {pod['id']} created at ${pod.get('costPerHr')}/hr")
     print(textwrap.dedent(f"""
-        The bootstrap is in the pod env as $T2A_BOOTSTRAP but is NOT run
+        The bootstrap is in the pod env as $TEXT2ASMR_BOOTSTRAP but is NOT run
         automatically -- run it yourself so you see it start:
 
           ssh root@<pod-host> -p <port>       # from runpod.io/console/pods
-          echo "$T2A_BOOTSTRAP" > /workspace/run.sh && bash /workspace/run.sh
+          echo "$TEXT2ASMR_BOOTSTRAP" > /workspace/run.sh && bash /workspace/run.sh
 
         Watch:   tail -f /workspace/bootstrap.log
         Stop:    terminate the pod in the console -- it bills until you do.

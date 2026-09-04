@@ -15,8 +15,8 @@ audio model needs the stereo image and the top octave.
 Each source file is deleted from the HF cache once processed, and progress is
 checkpointed to ``state.json``, so the job resumes after an interruption.
 
-    python scripts/build_datasets.py --out ~/t2a/out --limit 50   # smoke test
-    python scripts/build_datasets.py --out ~/t2a/out              # full run
+    python scripts/build_datasets.py --out ~/text2asmr/out --limit 50   # smoke test
+    python scripts/build_datasets.py --out ~/text2asmr/out              # full run
 """
 
 from __future__ import annotations
@@ -34,12 +34,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from t2a.data.ontology import (  # noqa: E402
+from text2asmr.data.ontology import (  # noqa: E402
     MARGIN,
     all_probes,
     intensity_from_loudness,
 )
-from t2a.data.segment import load_alignment, split_alignment  # noqa: E402
+from text2asmr.data.segment import load_alignment, split_alignment  # noqa: E402
 
 REPO = "aoxo/audios"
 CLAP = "laion/clap-htsat-fused"
