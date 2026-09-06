@@ -6,24 +6,32 @@ of them sit idle waiting on the others:
 
   producer (network)  -> download_q -> transcriber (GPU) -> upload_q -> uploader (network)
 
-The transcriber is the only stage touching the GPU, and runs a single
-faster-whisper model instance (~1-2GB VRAM) so it coexists with the trigger
-LoRA training already running on this card (~11-13GB) without contention --
-verified empirically before this script existed by loading the model
-standalone and checking nvidia-smi.
+Worker count per stage is configurable independently, since the right
+balance depends on the host: on tinkerspace's RTX 4000, sharing the card
+with trigger training, one lightweight transcriber (~1-2GB VRAM) is the
+point -- verified empirically by loading the model standalone and checking
+nvidia-smi. On a dedicated high-end GPU (A100/H100 on RunPod), a single
+faster-whisper call doesn't come close to saturating the card's FLOPs, so
+--transcribe-workers spawns that many independent model instances (each
+gets its own WhisperModel; ctranslate2 models aren't documented as safe for
+concurrent transcribe() calls from multiple threads on one instance, so
+separate instances is the correct way to parallelize, not a workaround) and
+--producer-workers/--uploader-workers add threads on the network-bound
+stages so they can keep that many transcribers fed.
 
 Alignment JSON matches aoxo/audios's own schema (a flat list of
 {"type": "word"|"silence", "start", "end", ...}), the same shape segment.py
 already parses -- so this output slots directly into the existing
 speech/trigger extraction pipeline, no new consumer needed.
 
-Progress is tracked in transcribed.txt (one "creator/filename" per line, one
-level of granularity finer than done.txt's per-creator tracking, since
-transcription happens per file). A file is only added to it after its JSON
-is confirmed uploaded -- a killed process re-lists the repo and just skips
-what's already marked done, safe to resume anytime.
+Progress is resumed by checking the Hub directly for an existing
+"<file>.json" sibling, not a local progress file -- a local file ties
+resumability to one specific machine, which breaks the moment the job needs
+to move (as it did: started on tinkerspace, continuing on RunPod). The Hub
+is the single source of truth regardless of which machine is running.
 
-    python3 scripts/transcribe_audios2.py --model medium --workers 1
+    python3 scripts/transcribe_audios2.py --model large-v3 --compute-type float16 \
+        --transcribe-workers 6 --producer-workers 4 --uploader-workers 4
 """
 
 from __future__ import annotations
@@ -31,7 +39,6 @@ from __future__ import annotations
 import argparse
 import queue
 import shutil
-import sys
 import threading
 import time
 from pathlib import Path
@@ -39,7 +46,6 @@ from pathlib import Path
 REPO_ID = "aoxo/audios2"
 BASE = Path.home() / "t2a"
 STAGE_DIR = BASE / "transcribe_stage"
-TRANSCRIBED_FILE = BASE / "transcribed.txt"
 LOG_FILE = BASE / "transcribe_audios2.log"
 
 # A gap this long between two consecutive words becomes its own "silence"
@@ -58,17 +64,6 @@ def log(msg: str) -> None:
             f.write(line + "\n")
 
 
-def read_done() -> set[str]:
-    if not TRANSCRIBED_FILE.exists():
-        return set()
-    return {ln.strip() for ln in TRANSCRIBED_FILE.read_text().splitlines() if ln.strip()}
-
-
-def mark_done(rel_path: str) -> None:
-    with TRANSCRIBED_FILE.open("a") as f:
-        f.write(rel_path + "\n")
-
-
 def words_to_alignment(segments) -> list[dict]:
     """Flatten faster-whisper segments into the word+silence entry schema."""
     entries: list[dict] = []
@@ -85,12 +80,11 @@ def words_to_alignment(segments) -> list[dict]:
     return entries
 
 
-def producer(work: queue.Queue, download_q: queue.Queue, stop: threading.Event) -> None:
+def producer(work: queue.Queue, download_q: queue.Queue,
+            remaining: list[int], lock: threading.Lock, n_transcribers: int) -> None:
     from huggingface_hub import hf_hub_download
 
     for rel_path in iter(work.get, None):
-        if stop.is_set():
-            break
         try:
             local = hf_hub_download(REPO_ID, rel_path, repo_type="dataset",
                                     local_dir=STAGE_DIR)
@@ -98,16 +92,28 @@ def producer(work: queue.Queue, download_q: queue.Queue, stop: threading.Event) 
             log(f"  [producer] download failed for {rel_path}: {exc}")
             continue
         download_q.put((rel_path, Path(local)))
-    download_q.put(None)  # sentinel: no more work coming
+    # With multiple producers, each pushing its own sentinel would leave the
+    # count mismatched against however many transcribers are waiting (too
+    # few sentinels hangs the extra transcribers forever; this isn't a
+    # theoretical concern, it's what a naive one-sentinel-per-thread version
+    # of this function actually did). Whichever producer finishes last posts
+    # exactly n_transcribers sentinels, which is the number that's actually
+    # needed regardless of how many producers there were.
+    with lock:
+        remaining[0] -= 1
+        if remaining[0] == 0:
+            for _ in range(n_transcribers):
+                download_q.put(None)
 
 
-def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue) -> None:
+def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id: int,
+                remaining: list[int], lock: threading.Lock, n_uploaders: int) -> None:
     for rel_path, local_path in iter(download_q.get, None):
         try:
             segments, _info = model.transcribe(str(local_path), word_timestamps=True)
             entries = words_to_alignment(list(segments))
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the pipeline
-            log(f"  [transcriber] failed for {rel_path}: {exc}")
+            log(f"  [transcriber-{worker_id}] failed for {rel_path}: {exc}")
             local_path.unlink(missing_ok=True)
             continue
 
@@ -116,11 +122,15 @@ def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue) -> None:
         json_path.write_text(json.dumps(entries))
         local_path.unlink(missing_ok=True)  # audio already lives on the Hub; done with our copy
         upload_q.put((rel_path, json_path))
-        log(f"  [transcriber] {rel_path}: {len(entries)} entries")
-    upload_q.put(None)
+        log(f"  [transcriber-{worker_id}] {rel_path}: {len(entries)} entries")
+    with lock:
+        remaining[0] -= 1
+        if remaining[0] == 0:
+            for _ in range(n_uploaders):
+                upload_q.put(None)
 
 
-def uploader(upload_q: queue.Queue, done_count: list[int]) -> None:
+def uploader(upload_q: queue.Queue, done_count: list[int], lock: threading.Lock) -> None:
     from huggingface_hub import HfApi
     api = HfApi()
 
@@ -136,50 +146,82 @@ def uploader(upload_q: queue.Queue, done_count: list[int]) -> None:
             log(f"  [uploader] upload failed for {rel_path}: {exc}")
             json_path.unlink(missing_ok=True)
             continue
-        mark_done(rel_path)
         json_path.unlink(missing_ok=True)
-        done_count[0] += 1
-        log(f"  [uploader] {rel_path} -> transcribed.txt ({done_count[0]} total this run)")
+        with lock:
+            done_count[0] += 1
+            count = done_count[0]
+        log(f"  [uploader] {rel_path} -> Hub ({count} total this run)")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="medium",
-                    help="faster-whisper model size; medium fits ~1-2GB VRAM")
-    ap.add_argument("--compute-type", default="int8_float16")
+                    help="faster-whisper model size; medium fits ~1-2GB VRAM, "
+                        "large-v3 wants a real GPU (~3GB+ per instance)")
+    ap.add_argument("--compute-type", default="int8_float16",
+                    help="int8_float16 for VRAM-constrained sharing; float16 "
+                        "for a dedicated GPU (faster, more accurate)")
+    ap.add_argument("--transcribe-workers", type=int, default=1,
+                    help="independent WhisperModel instances -- one faster-"
+                        "whisper call doesn't saturate a big GPU's FLOPs, so "
+                        "this is the real parallelism knob on a dedicated card")
+    ap.add_argument("--producer-workers", type=int, default=1,
+                    help="download threads; raise alongside --transcribe-"
+                        "workers so network fetch doesn't starve the GPU")
+    ap.add_argument("--uploader-workers", type=int, default=1)
     args = ap.parse_args()
 
     from faster_whisper import WhisperModel
     from huggingface_hub import HfApi
 
     STAGE_DIR.mkdir(parents=True, exist_ok=True)
-    log(f"loading faster-whisper {args.model} ({args.compute_type})...")
-    model = WhisperModel(args.model, device="cuda", compute_type=args.compute_type)
-    log("model loaded")
+    log(f"loading {args.transcribe_workers}x faster-whisper {args.model} "
+        f"({args.compute_type})...")
+    models = [WhisperModel(args.model, device="cuda", compute_type=args.compute_type)
+             for _ in range(args.transcribe_workers)]
+    log("model(s) loaded")
 
     api = HfApi()
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
+    all_set = set(all_files)
     audio_files = [f for f in all_files if f.lower().endswith(".m4a")]
-    done = read_done()
-    todo = [f for f in audio_files if f not in done]
-    log(f"{len(audio_files)} audio files total, {len(done)} already transcribed, "
-        f"{len(todo)} remaining")
+    todo = [f for f in audio_files if f + ".json" not in all_set]
+    log(f"{len(audio_files)} audio files total, {len(audio_files) - len(todo)} "
+        f"already transcribed (per existing .json on the Hub), {len(todo)} remaining")
 
     work: queue.Queue = queue.Queue()
-    download_q: queue.Queue = queue.Queue(maxsize=4)  # backpressure: don't outrun the GPU
+    # Backpressure sized to roughly one in-flight file per transcriber, so
+    # producers don't run far ahead of what the GPU can actually consume.
+    download_q: queue.Queue = queue.Queue(maxsize=max(4, args.transcribe_workers * 2))
     upload_q: queue.Queue = queue.Queue()
-    stop = threading.Event()
     done_count = [0]
+    count_lock = threading.Lock()
+    producers_remaining = [args.producer_workers]
+    producers_lock = threading.Lock()
+    transcribers_remaining = [args.transcribe_workers]
+    transcribers_lock = threading.Lock()
 
     for f in todo:
         work.put(f)
-    work.put(None)
+    for _ in range(args.producer_workers):
+        work.put(None)  # one stop signal per producer thread
 
-    threads = [
-        threading.Thread(target=producer, args=(work, download_q, stop), daemon=True),
-        threading.Thread(target=transcriber, args=(model, download_q, upload_q), daemon=True),
-        threading.Thread(target=uploader, args=(upload_q, done_count), daemon=True),
-    ]
+    threads = (
+        [threading.Thread(target=producer,
+                          args=(work, download_q, producers_remaining, producers_lock,
+                                args.transcribe_workers),
+                          daemon=True)
+         for _ in range(args.producer_workers)]
+        + [threading.Thread(target=transcriber,
+                            args=(models[i], download_q, upload_q, i,
+                                  transcribers_remaining, transcribers_lock,
+                                  args.uploader_workers),
+                            daemon=True)
+           for i in range(args.transcribe_workers)]
+        + [threading.Thread(target=uploader, args=(upload_q, done_count, count_lock),
+                            daemon=True)
+           for _ in range(args.uploader_workers)]
+    )
     for t in threads:
         t.start()
     for t in threads:
