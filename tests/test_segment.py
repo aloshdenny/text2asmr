@@ -22,7 +22,7 @@ def silence(start, end):
 
 def test_consecutive_words_merge_into_one_phrase():
     spans = split_alignment(
-        [word("hello", 0.0, 0.4), word("there", 0.5, 1.2)], "1", intro_skip_s=0
+        [word("hello", 0.0, 0.4), word("there", 0.5, 1.2)], "1"
     )
     assert len(spans) == 1
     assert spans[0].kind == "speech"
@@ -32,30 +32,30 @@ def test_consecutive_words_merge_into_one_phrase():
 
 def test_long_gap_breaks_the_phrase():
     spans = split_alignment(
-        [word("one", 0.0, 1.0), word("two", 3.0, 4.2)], "1", intro_skip_s=0
+        [word("one", 0.0, 1.0), word("two", 3.0, 4.2)], "1"
     )
     assert [s.text for s in spans if s.kind == "speech"] == ["one", "two"]
 
 
 def test_short_phrases_are_dropped():
     # 0.3 s is below MIN_SPEECH_S and unusable as a training example.
-    assert split_alignment([word("hi", 0.0, 0.3)], "1", intro_skip_s=0) == []
+    assert split_alignment([word("hi", 0.0, 0.3)], "1") == []
 
 
 def test_loud_gap_becomes_a_trigger_candidate():
-    spans = split_alignment([silence(0.0, 5.0)], "1", intro_skip_s=0)
+    spans = split_alignment([silence(0.0, 5.0)], "1")
     assert len(spans) == 1
     assert spans[0].kind == "trigger_candidate"
     assert spans[0].duration == 5.0
 
 
 def test_short_silence_is_not_a_trigger_candidate():
-    assert split_alignment([silence(0.0, MIN_TRIGGER_S - 0.1)], "1", intro_skip_s=0) == []
+    assert split_alignment([silence(0.0, MIN_TRIGGER_S - 0.1)], "1") == []
 
 
 def test_long_silence_is_chunked_into_windows():
     # A 60 s brushing pause is many examples, not one oversized one.
-    spans = split_alignment([silence(0.0, 60.0)], "1", intro_skip_s=0)
+    spans = split_alignment([silence(0.0, 60.0)], "1")
     assert len(spans) == 5
     assert all(s.kind == "trigger_candidate" for s in spans)
     assert all(s.duration <= 12.0 for s in spans)
@@ -64,20 +64,20 @@ def test_long_silence_is_chunked_into_windows():
 
 def test_silence_remainder_below_minimum_is_dropped():
     # 13 s -> one 12 s window, then a 1 s remainder that is too short.
-    spans = split_alignment([silence(0.0, 13.0)], "1", intro_skip_s=0)
+    spans = split_alignment([silence(0.0, 13.0)], "1")
     assert [s.duration for s in spans] == [12.0]
 
 
 def test_overlong_word_run_is_split_at_max_speech():
     entries = [word(f"w{i}", i * 1.0, i * 1.0 + 0.9) for i in range(30)]
-    spans = [s for s in split_alignment(entries, "1", intro_skip_s=0) if s.kind == "speech"]
+    spans = [s for s in split_alignment(entries, "1") if s.kind == "speech"]
     assert len(spans) > 1
     assert all(s.duration <= MAX_SPEECH_S for s in spans)
 
 
 def test_speech_and_triggers_interleave_in_time_order():
     spans = split_alignment(
-        [word("a", 0.0, 1.2), silence(1.2, 6.0), word("b", 6.0, 7.5)], "1", intro_skip_s=0
+        [word("a", 0.0, 1.2), silence(1.2, 6.0), word("b", 6.0, 7.5)], "1"
     )
     assert [s.kind for s in spans] == ["speech", "trigger_candidate", "speech"]
     assert [s.start for s in spans] == sorted(s.start for s in spans)
@@ -85,7 +85,7 @@ def test_speech_and_triggers_interleave_in_time_order():
 
 def test_entries_are_sorted_before_splitting():
     spans = split_alignment(
-        [word("second", 2.0, 3.2), word("first", 0.0, 1.2)], "1", intro_skip_s=0
+        [word("second", 2.0, 3.2), word("first", 0.0, 1.2)], "1"
     )
     assert spans[0].text == "first" or "first" in spans[0].text
 
@@ -96,12 +96,12 @@ def test_malformed_entries_are_skipped():
         {"type": "word", "word": "y", "start": 5.0, "end": 1.0},  # inverted
         word("good", 0.0, 1.5),
     ]
-    spans = split_alignment(entries, "1", intro_skip_s=0)
+    spans = split_alignment(entries, "1")
     assert [s.text for s in spans] == ["good"]
 
 
 def test_uid_is_stable_and_unique_per_span():
-    spans = split_alignment([silence(0.0, 30.0)], "7", intro_skip_s=0)
+    spans = split_alignment([silence(0.0, 30.0)], "7")
     uids = [s.uid for s in spans]
     assert len(set(uids)) == len(uids)
     assert all(u.startswith("7_") for u in uids)
@@ -128,7 +128,7 @@ def test_load_alignment_rejects_unrecognised_shape(tmp_path):
 
 def test_summarise_reports_both_streams():
     spans = split_alignment(
-        [word("a", 0.0, 1.2), silence(1.2, 20.0), word("b", 20.0, 21.5)], "1", intro_skip_s=0
+        [word("a", 0.0, 1.2), silence(1.2, 20.0), word("b", 20.0, 21.5)], "1"
     )
     out = summarise(spans)
     assert out["speech_segments"] == 2
@@ -146,7 +146,7 @@ def test_short_inter_word_silences_do_not_break_the_phrase():
         word("soft", 0.34, 0.70), silence(0.70, 0.75),
         word("brush", 0.75, 1.40),
     ]
-    spans = split_alignment(entries, "1", intro_skip_s=0)
+    spans = split_alignment(entries, "1")
     assert len(spans) == 1
     assert spans[0].text == "the soft brush"
 
@@ -155,5 +155,37 @@ def test_long_silence_still_breaks_the_phrase_and_yields_a_trigger():
     entries = [
         word("one", 0.0, 1.2), silence(1.2, 9.0), word("two", 9.0, 10.4),
     ]
-    kinds = [s.kind for s in split_alignment(entries, "1", intro_skip_s=0)]
+    kinds = [s.kind for s in split_alignment(entries, "1")]
     assert kinds == ["speech", "trigger_candidate", "speech"]
+
+
+def test_gap_before_first_word_is_dropped_as_intro():
+    # A generic branded intro (music sting, jingle) looks exactly like a real
+    # trigger to the word-gap heuristic -- both are "no words found here".
+    # The only thing distinguishing them is that intro always sits before
+    # the creator says anything at all.
+    entries = [silence(0.0, 40.0), word("hi", 40.0, 40.4)]
+    kinds = [s.kind for s in split_alignment(entries, "1")]
+    assert "trigger_candidate" not in kinds
+
+
+def test_gap_after_first_word_is_kept_even_if_early_in_the_file():
+    # A fixed clock-time cutoff (the old approach) would drop this: it starts
+    # at t=2s, well inside any plausible "first N seconds" window. But it
+    # comes after real speech has already started, so it's ordinary program
+    # content, not intro -- exactly the case a flat cutoff gets wrong.
+    entries = [
+        word("hi", 0.0, 0.4), silence(0.4, 2.0),
+        word("there", 2.0, 2.3), silence(2.0 + 0.3, 15.0),
+    ]
+    kinds = [s.kind for s in split_alignment(entries, "1")]
+    assert "trigger_candidate" in kinds
+
+
+def test_word_only_file_with_no_speech_keeps_every_trigger_candidate():
+    # A pure-trigger compilation with no speech at all gives no basis for
+    # calling any part of it "pre-speech intro" -- nothing here should be
+    # rejected just because seen_first_word would otherwise never flip true.
+    spans = split_alignment([silence(0.0, 5.0), silence(10.0, 15.0)], "1")
+    assert len(spans) == 2
+    assert all(s.kind == "trigger_candidate" for s in spans)

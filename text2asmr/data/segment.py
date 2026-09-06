@@ -36,15 +36,6 @@ MAX_TRIGGER_S = 12.0
 # deliberate, so this is looser than a conversational-speech default would be.
 PHRASE_GAP_S = 0.7
 
-# Most ASMR videos open with a few seconds to a minute of generic branded
-# intro (music sting, channel jingle) before any speech starts. The ASR finds
-# no words there, so the word-gap heuristic below treats it exactly like a
-# real trigger gap -- with nothing to tell "intro music" apart from "brushing
-# with no talking over it" except that it happens to sit at the very start of
-# the file. Dropping trigger candidates before this cutoff is a cheap, direct
-# fix for a real contamination source confirmed by listening to samples: 4-8%
-# of the corpus's trigger clips start under 30-60s into their source file.
-INTRO_SKIP_S = 30.0
 
 
 @dataclass(frozen=True)
@@ -90,20 +81,36 @@ def _valid(entry: dict) -> bool:
     return end > start
 
 
-def split_alignment(entries: Sequence[dict], source: str,
-                    intro_skip_s: float = INTRO_SKIP_S) -> list[Span]:
+def split_alignment(entries: Sequence[dict], source: str) -> list[Span]:
     """Split one file's alignment into speech phrases and trigger candidates.
 
     Consecutive words are merged into a phrase until either a gap longer than
     ``PHRASE_GAP_S`` or ``MAX_SPEECH_S`` of accumulated audio forces a break.
     Merging matters: individual words are too short to finetune on, and the
     natural unit for ASMR speech is the phrase.
+
+    The gap before the creator's first spoken word is treated as intro
+    (music sting, channel jingle) and never becomes a trigger candidate --
+    the ASR finds no words there, same as it wouldn't over real brushing, so
+    nothing else in the alignment tells the two apart. A fixed clock-time
+    cutoff (the previous approach: drop everything under 30s) got this
+    wrong in both directions: a short intro leaves genuine early trigger
+    content sitting inside the cutoff window and gets it dropped anyway, and
+    a long intro runs past the cutoff and contaminates the corpus regardless.
+    Anchoring to the first word instead adapts per file and only ever
+    excludes the specific gap that's actually pre-speech, whatever its
+    length -- gaps after speech has started are ordinary program content
+    regardless of how early they fall in the file.
     """
     entries = [e for e in entries if _valid(e)]
     entries = sorted(entries, key=lambda e: float(e["start"]))
 
     spans: list[Span] = []
     words: list[dict] = []
+    # A file with no words at all gives no basis for calling anything
+    # "pre-speech" -- treat the anchor as already passed rather than
+    # rejecting every trigger candidate in an otherwise trigger-only file.
+    seen_first_word = not any(e.get("type") == "word" for e in entries)
 
     def flush() -> None:
         if not words:
@@ -123,6 +130,7 @@ def split_alignment(entries: Sequence[dict], source: str,
                 if gap > PHRASE_GAP_S or run > MAX_SPEECH_S:
                     flush()
             words.append(entry)
+            seen_first_word = True
             continue
 
         start, end = float(entry["start"]), float(entry["end"])
@@ -135,7 +143,7 @@ def split_alignment(entries: Sequence[dict], source: str,
         flush()
         if end - start < MIN_TRIGGER_S:
             continue
-        if start < intro_skip_s:
+        if not seen_first_word:
             continue
         # Long gaps are chopped into windows rather than dropped; a 60 s pause
         # full of brushing is many training examples, not one unusable one.
