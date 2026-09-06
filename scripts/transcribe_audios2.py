@@ -264,6 +264,14 @@ def main() -> int:
                     help="silence must be at least this long to get skipped; "
                         "lower than faster-whisper's own 2000ms default since "
                         "segment.py already treats gaps over 700ms as real breaks")
+    ap.add_argument("--num-shards", type=int, default=1,
+                    help="split the remaining-to-do list across this many "
+                        "independent pods; each pod's --shard-index picks its "
+                        "own slice, so running the same script on N pods "
+                        "against the same repo doesn't have them all race for "
+                        "the same first files with no coordination")
+    ap.add_argument("--shard-index", type=int, default=0,
+                    help="which shard this instance processes, 0-indexed")
     args = ap.parse_args()
 
     from faster_whisper import WhisperModel
@@ -283,6 +291,22 @@ def main() -> int:
     todo = [f for f in audio_files if f + ".json" not in all_set]
     log(f"{len(audio_files)} audio files total, {len(audio_files) - len(todo)} "
         f"already transcribed (per existing .json on the Hub), {len(todo)} remaining")
+
+    if args.num_shards > 1:
+        # A stable hash of the filename, not a positional index into `todo`:
+        # each pod lists the repo independently and at a slightly different
+        # moment, so the list's order and length can differ pod-to-pod (a
+        # file finishing between two pods' listing calls shifts everything
+        # after it in an index-based split). Hashing the filename itself
+        # gives every pod the same shard assignment for the same file
+        # regardless of list order -- Python's builtin hash() is salted
+        # per-process and would silently break this, so this uses zlib's
+        # crc32, which is stable across processes and machines.
+        import zlib
+        pre_shard = len(todo)
+        todo = [f for f in todo if zlib.crc32(f.encode()) % args.num_shards == args.shard_index]
+        log(f"shard {args.shard_index}/{args.num_shards}: {len(todo)}/{pre_shard} "
+            f"of the remaining files")
 
     work: queue.Queue = queue.Queue()
     # Backpressure sized to roughly one in-flight file per transcriber, so
