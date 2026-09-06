@@ -107,10 +107,25 @@ def producer(work: queue.Queue, download_q: queue.Queue,
 
 
 def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id: int,
-                remaining: list[int], lock: threading.Lock, n_uploaders: int) -> None:
+                remaining: list[int], lock: threading.Lock, n_uploaders: int,
+                vad_filter: bool, vad_min_silence_ms: int) -> None:
     for rel_path, local_path in iter(download_q.get, None):
         try:
-            segments, _info = model.transcribe(str(local_path), word_timestamps=True)
+            # ASMR audio structurally has long non-speech stretches (trigger
+            # sounds with no talking over them) mixed with speech -- VAD
+            # skips those before they ever reach the decoder, rather than
+            # running full Whisper inference over audio with nothing to
+            # transcribe. This doesn't lose the gap information: the caller
+            # only ever wanted word-level timing for speech anyway, and
+            # words_to_alignment() already turns any gap between consecutive
+            # words into a "silence" entry -- a VAD-skipped stretch is just a
+            # (typically much larger) instance of that same gap, needing no
+            # separate handling.
+            segments, _info = model.transcribe(
+                str(local_path), word_timestamps=True,
+                vad_filter=vad_filter,
+                vad_parameters={"min_silence_duration_ms": vad_min_silence_ms},
+            )
             entries = words_to_alignment(list(segments))
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the pipeline
             log(f"  [transcriber-{worker_id}] failed for {rel_path}: {exc}")
@@ -130,27 +145,85 @@ def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id
                 upload_q.put(None)
 
 
+UPLOAD_BATCH_SIZE = 20
+UPLOAD_BATCH_TIMEOUT_S = 30.0
+
+
+def _commit_batch(api, batch: list[tuple[str, Path]]) -> bool:
+    """One create_commit() call for the whole batch, instead of one commit
+    per file. The Hub's commit rate limit (128/hour, hit in practice with 16
+    parallel transcribers each pushing single-file commits) is per-commit,
+    not per-file inside a commit -- batching is the actual fix, not just a
+    speed optimization.
+    """
+    from huggingface_hub import CommitOperationAdd
+
+    ops = [CommitOperationAdd(path_in_repo=rel_path + ".json", path_or_fileobj=str(json_path))
+          for rel_path, json_path in batch]
+    try:
+        api.create_commit(
+            repo_id=REPO_ID, repo_type="dataset", operations=ops,
+            commit_message=f"transcripts for {len(batch)} files",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 - caller decides whether to retry
+        log(f"  [uploader] batch commit failed ({len(batch)} files): {exc}")
+        return False
+
+
 def uploader(upload_q: queue.Queue, done_count: list[int], lock: threading.Lock) -> None:
     from huggingface_hub import HfApi
     api = HfApi()
 
-    for rel_path, json_path in iter(upload_q.get, None):
-        remote_path = rel_path + ".json"
+    batch: list[tuple[str, Path]] = []
+    batch_deadline: float | None = None
+    finished = False
+
+    while not finished:
+        timeout = None
+        if batch_deadline is not None:
+            timeout = max(0.0, batch_deadline - time.time())
         try:
-            api.upload_file(
-                path_or_fileobj=str(json_path), path_in_repo=remote_path,
-                repo_id=REPO_ID, repo_type="dataset",
-                commit_message=f"transcript for {rel_path}",
-            )
-        except Exception as exc:  # noqa: BLE001 - one bad upload must not kill the pipeline
-            log(f"  [uploader] upload failed for {rel_path}: {exc}")
-            json_path.unlink(missing_ok=True)
+            item = upload_q.get(timeout=timeout)
+        except queue.Empty:
+            item = "FLUSH"  # deadline hit with a non-empty batch
+
+        if item is None:
+            finished = True
+        elif item != "FLUSH":
+            batch.append(item)
+            if batch_deadline is None:
+                batch_deadline = time.time() + UPLOAD_BATCH_TIMEOUT_S
+
+        should_flush = (
+            len(batch) >= UPLOAD_BATCH_SIZE
+            or (finished and batch)
+            or (item == "FLUSH" and batch)
+        )
+        if not should_flush:
             continue
-        json_path.unlink(missing_ok=True)
+
+        # A failed commit must not lose the (expensive: GPU minutes of
+        # transcription) work it represents -- keep retrying with backoff
+        # rather than discarding, matching the same instinct as the rest of
+        # this pipeline's "never delete on failure" try/except blocks.
+        delay = 5.0
+        while not _commit_batch(api, batch):
+            time.sleep(delay)
+            delay = min(delay * 2, 120.0)
+
+        for rel_path, json_path in batch:
+            try:
+                json_path.unlink(missing_ok=True)
+            except OSError as exc:  # noqa: BLE001 - the commit already succeeded
+                log(f"  [uploader] cleanup failed for {rel_path} (harmless, "
+                    f"already committed): {exc}")
         with lock:
-            done_count[0] += 1
+            done_count[0] += len(batch)
             count = done_count[0]
-        log(f"  [uploader] {rel_path} -> Hub ({count} total this run)")
+        log(f"  [uploader] committed {len(batch)} files -> Hub ({count} total this run)")
+        batch = []
+        batch_deadline = None
 
 
 def main() -> int:
@@ -168,7 +241,21 @@ def main() -> int:
     ap.add_argument("--producer-workers", type=int, default=1,
                     help="download threads; raise alongside --transcribe-"
                         "workers so network fetch doesn't starve the GPU")
-    ap.add_argument("--uploader-workers", type=int, default=1)
+    ap.add_argument("--uploader-workers", type=int, default=1,
+                    help="the Hub's commit rate limit (128/hour, hit in "
+                        "practice at --transcribe-workers 16 before batching "
+                        "was added) is per-repo, not per-connection -- more "
+                        "uploader threads each batching independently just "
+                        "multiplies commit frequency without raising the "
+                        "ceiling, so 1 is correct here, not a bottleneck")
+    ap.add_argument("--vad-filter", dest="vad_filter", action="store_true", default=True,
+                    help="skip non-speech audio before it reaches the decoder "
+                        "(default on -- ASMR audio has long non-speech stretches)")
+    ap.add_argument("--no-vad-filter", dest="vad_filter", action="store_false")
+    ap.add_argument("--vad-min-silence-ms", type=int, default=1000,
+                    help="silence must be at least this long to get skipped; "
+                        "lower than faster-whisper's own 2000ms default since "
+                        "segment.py already treats gaps over 700ms as real breaks")
     args = ap.parse_args()
 
     from faster_whisper import WhisperModel
@@ -215,7 +302,8 @@ def main() -> int:
         + [threading.Thread(target=transcriber,
                             args=(models[i], download_q, upload_q, i,
                                   transcribers_remaining, transcribers_lock,
-                                  args.uploader_workers),
+                                  args.uploader_workers, args.vad_filter,
+                                  args.vad_min_silence_ms),
                             daemon=True)
            for i in range(args.transcribe_workers)]
         + [threading.Thread(target=uploader, args=(upload_q, done_count, count_lock),
