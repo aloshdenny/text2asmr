@@ -68,7 +68,8 @@ def list_gpus(api_key: str) -> list[dict]:
     return gql(q, api_key)["gpuTypes"]
 
 
-def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
+def bootstrap_script(stage: str, hf_token_env: str, repo: str,
+                     transcribe_workers: int = 16, io_workers: int = 8) -> str:
     """Commands the pod runs on boot.
 
     Deliberately NOT an f-string: this text contains shell brace groups and an
@@ -124,6 +125,19 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
           --push-repo aoxo/text2asmr-stable-audio
     fi
 
+    if [ "$STAGE" = "transcribe" ]; then
+      echo "=== transcribing aoxo/audios2 with faster-whisper ==="
+      python -m pip install -q faster-whisper "huggingface_hub[hf_transfer]"
+
+      echo "=== gpu ==="
+      nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+
+      python /workspace/text2asmr/scripts/transcribe_audios2.py \
+          --model large-v3 --compute-type float16 \
+          --transcribe-workers __TRANSCRIBE_WORKERS__ \
+          --producer-workers __IO_WORKERS__ --uploader-workers __IO_WORKERS__
+    fi
+
     if [ "$STAGE" = "build" ] || [ "$STAGE" = "all" ]; then
       echo "=== rebuilding corpus from aoxo/audios ==="
       python -m pip install -q transformers datasets soundfile librosa
@@ -146,7 +160,9 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str) -> str:
     """
     script = (script.replace("__REPO__", repo)
                     .replace("__TOKENENV__", hf_token_env)
-                    .replace("__STAGE__", stage))
+                    .replace("__STAGE__", stage)
+                    .replace("__TRANSCRIBE_WORKERS__", str(transcribe_workers))
+                    .replace("__IO_WORKERS__", str(io_workers)))
     return textwrap.dedent(script).strip()
 
 
@@ -181,7 +197,11 @@ def main() -> int:
     ap.add_argument("--gpu", default="RTX 4090",
                     help="display name substring, e.g. 'RTX 4090', 'A6000'")
     ap.add_argument("--stage", default="all",
-                    choices=["build", "train", "triggers", "all"])
+                    choices=["build", "train", "triggers", "transcribe", "all"])
+    ap.add_argument("--transcribe-workers", type=int, default=16,
+                    help="parallel WhisperModel instances (transcribe stage only)")
+    ap.add_argument("--io-workers", type=int, default=8,
+                    help="download/upload threads per side (transcribe stage only)")
     ap.add_argument("--name", default="text2asmr")
     ap.add_argument("--image", default="",
                     help="container image; defaults per stage (the trigger "
@@ -225,6 +245,12 @@ def main() -> int:
         )
         print(f"image: {args.image}")
 
+    if args.stage == "transcribe" and args.disk == 200:
+        # Transcription doesn't need the full corpus-build/training volume;
+        # 200GB default would just be wasted allocation for a job that only
+        # streams individual audio files through and deletes them after.
+        args.disk = 30
+
     matches = [g for g in list_gpus(api_key)
                if args.gpu.lower() in g["displayName"].lower()]
     if not matches:
@@ -249,10 +275,12 @@ def main() -> int:
         # Must be present at creation: adding the account key later does not
         # reach an already-running pod.
         "PUBLIC_KEY": args.pubkey.read_text().strip(),
-        "TEXT2ASMR_BOOTSTRAP": bootstrap_script(args.stage, "HF_TOKEN", args.repo),
+        "TEXT2ASMR_BOOTSTRAP": bootstrap_script(
+            args.stage, "HF_TOKEN", args.repo,
+            args.transcribe_workers, args.io_workers),
     }
 
-    est = {"build": 4, "train": 10, "triggers": 12, "all": 14}[args.stage]
+    est = {"build": 4, "train": 10, "triggers": 12, "transcribe": 3, "all": 14}[args.stage]
     print(f"stage={args.stage}  est ~{est}h  "
           f"~${(price or 0) * est:.2f} at ${price}/hr")
 
