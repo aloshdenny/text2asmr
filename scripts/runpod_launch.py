@@ -262,11 +262,20 @@ def main() -> int:
         # streams individual audio files through and deletes them after.
         args.disk = 30
 
-    matches = [g for g in list_gpus(api_key)
-               if args.gpu.lower() in g["displayName"].lower()]
+    all_gpus = list_gpus(api_key)
+    # Exact match first: substring alone is a real trap here (e.g. "A40"
+    # matches inside "RTX A4000", a completely different 16GB card at a
+    # different price -- hit this for real, not hypothetically).
+    matches = [g for g in all_gpus if args.gpu.lower() == g["displayName"].lower()]
+    if not matches:
+        matches = [g for g in all_gpus if args.gpu.lower() in g["displayName"].lower()]
     if not matches:
         print(f"No GPU matching {args.gpu!r}. Try --list-gpus.", file=sys.stderr)
         return 2
+    if len(matches) > 1:
+        print(f"Multiple GPUs match {args.gpu!r}: "
+              f"{[g['displayName'] for g in matches]} -- picking cheapest, "
+              f"pass the exact displayName to be specific.")
     gpu = min(matches,
               key=lambda g: (g.get("lowestPrice") or {}).get(
                   "uninterruptablePrice") or 9e9)
