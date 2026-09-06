@@ -146,7 +146,15 @@ def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id
 
 
 UPLOAD_BATCH_SIZE = 20
-UPLOAD_BATCH_TIMEOUT_S = 30.0
+# 30s was still landing close to the Hub's 128/hour commit ceiling in
+# practice: real throughput (~90-105 files/hour across 16 transcribers) means
+# most batches flush via this timeout with only 1-4 files rather than
+# reaching UPLOAD_BATCH_SIZE, so the steady-state commit rate was ~120/hour
+# with no margin for bursts -- confirmed by 266 rate-limit hits in one run
+# (survived via retry, but still real wasted time). 90s drops steady-state
+# to ~40/hour, comfortable headroom even during a burst of several files
+# finishing at once.
+UPLOAD_BATCH_TIMEOUT_S = 90.0
 
 
 def _commit_batch(api, batch: list[tuple[str, Path]]) -> bool:
