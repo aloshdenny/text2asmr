@@ -69,7 +69,8 @@ def list_gpus(api_key: str) -> list[dict]:
 
 
 def bootstrap_script(stage: str, hf_token_env: str, repo: str,
-                     transcribe_workers: int = 16, io_workers: int = 8) -> str:
+                     transcribe_workers: int = 16, io_workers: int = 8,
+                     num_shards: int = 1, shard_index: int = 0) -> str:
     """Commands the pod runs on boot.
 
     Deliberately NOT an f-string: this text contains shell brace groups and an
@@ -135,7 +136,8 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str,
       python /workspace/text2asmr/scripts/transcribe_audios2.py \
           --model large-v3 --compute-type float16 \
           --transcribe-workers __TRANSCRIBE_WORKERS__ \
-          --producer-workers __IO_WORKERS__ --uploader-workers __IO_WORKERS__
+          --producer-workers __IO_WORKERS__ --uploader-workers 1 \
+          --num-shards __NUM_SHARDS__ --shard-index __SHARD_INDEX__
     fi
 
     if [ "$STAGE" = "build" ] || [ "$STAGE" = "all" ]; then
@@ -162,7 +164,9 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str,
                     .replace("__TOKENENV__", hf_token_env)
                     .replace("__STAGE__", stage)
                     .replace("__TRANSCRIBE_WORKERS__", str(transcribe_workers))
-                    .replace("__IO_WORKERS__", str(io_workers)))
+                    .replace("__IO_WORKERS__", str(io_workers))
+                    .replace("__NUM_SHARDS__", str(num_shards))
+                    .replace("__SHARD_INDEX__", str(shard_index)))
     return textwrap.dedent(script).strip()
 
 
@@ -201,7 +205,14 @@ def main() -> int:
     ap.add_argument("--transcribe-workers", type=int, default=16,
                     help="parallel WhisperModel instances (transcribe stage only)")
     ap.add_argument("--io-workers", type=int, default=8,
-                    help="download/upload threads per side (transcribe stage only)")
+                    help="download threads (transcribe stage only; uploader "
+                        "is always 1 -- see transcribe_audios2.py)")
+    ap.add_argument("--num-shards", type=int, default=1,
+                    help="split the remaining-to-transcribe backlog across "
+                        "this many pods (transcribe stage only)")
+    ap.add_argument("--shard-index", type=int, default=0,
+                    help="which shard this pod processes, 0-indexed "
+                        "(transcribe stage only)")
     ap.add_argument("--name", default="text2asmr")
     ap.add_argument("--image", default="",
                     help="container image; defaults per stage (the trigger "
@@ -284,7 +295,8 @@ def main() -> int:
         "PUBLIC_KEY": args.pubkey.read_text().strip(),
         "TEXT2ASMR_BOOTSTRAP": bootstrap_script(
             args.stage, "HF_TOKEN", args.repo,
-            args.transcribe_workers, args.io_workers),
+            args.transcribe_workers, args.io_workers,
+            args.num_shards, args.shard_index),
     }
 
     est = {"build": 4, "train": 10, "triggers": 12, "transcribe": 3, "all": 14}[args.stage]
