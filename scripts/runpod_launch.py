@@ -127,7 +127,7 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str,
 
     if [ "$STAGE" = "transcribe" ]; then
       echo "=== transcribing aoxo/audios2 with faster-whisper ==="
-      python -m pip install -q faster-whisper "huggingface_hub[hf_transfer]"
+      python -m pip install -q faster-whisper "huggingface_hub[hf_xet]"
 
       echo "=== gpu ==="
       nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
@@ -271,7 +271,14 @@ def main() -> int:
 
     env = {
         "HF_TOKEN": hf_token,
-        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+        # HF_HUB_ENABLE_HF_TRANSFER is a dead setting on huggingface_hub
+        # >=1.0 -- it moved from the old hf_transfer Rust accelerator to a
+        # new "Xet" chunked-dedup backend, silently ignoring this var rather
+        # than erroring. Xet itself defaults on; HF_XET_HIGH_PERFORMANCE is
+        # the flag that actually enables its multi-connection parallelism
+        # (confirmed empirically: 1 connection without it, 10 with it, on
+        # the same upload).
+        "HF_XET_HIGH_PERFORMANCE": "1",
         # Must be present at creation: adding the account key later does not
         # reach an already-running pod.
         "PUBLIC_KEY": args.pubkey.read_text().strip(),
