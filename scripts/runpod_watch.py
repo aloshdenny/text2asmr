@@ -30,7 +30,10 @@ def gql(query: str, api_key: str) -> dict:
     req = urllib.request.Request(
         f"{GQL}?api_key={api_key}",
         data=json.dumps({"query": query}).encode(),
-        headers={"Content-Type": "application/json"},
+        # RunPod's API blocks urllib's default User-Agent at Cloudflare
+        # (403, error code 1010) -- same fix as runpod_launch.py needed.
+        headers={"Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) text2asmr"},
     )
     try:
         with urllib.request.urlopen(req, timeout=45) as r:
