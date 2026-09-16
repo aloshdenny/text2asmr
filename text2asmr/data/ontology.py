@@ -106,6 +106,11 @@ TRIGGERS: tuple[Trigger, ...] = (
     Trigger("cutting", (
         "scissors cutting hair", "snipping scissors",
     ), transient=True),
+    Trigger("whispering", (
+        "soft ASMR whispering without clear words",
+        "breathy whisper close to a microphone",
+        "inaudible whispering sounds",
+    )),
 )
 
 #: Probes for content that must NOT be tagged as a trigger.  A candidate

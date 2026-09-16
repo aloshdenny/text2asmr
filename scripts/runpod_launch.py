@@ -129,15 +129,19 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str,
     if [ "$STAGE" = "transcribe" ]; then
       echo "=== transcribing aoxo/audios2 with faster-whisper ==="
       python -m pip install -q faster-whisper "huggingface_hub[hf_xet]"
-
+      mkdir -p /workspace/t2a
+      export TRANSCRIBE_BASE=/workspace/t2a
       echo "=== gpu ==="
-      nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-
-      python /workspace/text2asmr/scripts/transcribe_audios2.py \
+      nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader
+      echo "waiting for /workspace/START (script + creators list)"
+      while [ ! -f /workspace/START ]; do sleep 2; done
+      python /workspace/transcribe_audios2.py \
           --model large-v3 --compute-type float16 \
-          --transcribe-workers __TRANSCRIBE_WORKERS__ \
-          --producer-workers __IO_WORKERS__ --uploader-workers 1 \
-          --num-shards __NUM_SHARDS__ --shard-index __SHARD_INDEX__
+          --transcribe-workers 0 \
+          --producer-workers 8 --uploader-workers 1 \
+          --upload-batch-size 128 \
+          --creators-file /workspace/creators.txt
+      echo "=== TRANSCRIBE_DONE ==="
     fi
 
     if [ "$STAGE" = "build" ] || [ "$STAGE" = "all" ]; then

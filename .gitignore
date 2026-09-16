@@ -15,3 +15,4 @@ __pycache__/
 /inference/out_ab/
 /inference/out_measure/
 /inference/out_smoke/
+/label_tool/
