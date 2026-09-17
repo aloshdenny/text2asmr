@@ -27,6 +27,12 @@ def cut_flac(src_path, start, dur, out_path):
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src_path),
                     "-ar", str(SR), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", str(out_path)], check=True, timeout=120)
 
+TOKEN_FILE = os.environ.get("GCS_TOKEN_FILE", "/workspace/gcs_token")
+def current_token(fallback):
+    try: return Path(TOKEN_FILE).read_text().strip() or fallback
+    except Exception: return fallback
+
+current_token.last_bad = None
 def gemini(model, flac_bytes, token, tries=6):
     body = {"contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": "audio/flac", "data": base64.b64encode(flac_bytes).decode()}}, {"text": prompt_text()}]}],
             "generationConfig": {"temperature": 0, "responseMimeType": "application/json",
@@ -34,7 +40,7 @@ def gemini(model, flac_bytes, token, tries=6):
     url = f"https://aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/global/publishers/google/models/{model}:generateContent"
     for i in range(tries):
         try:
-            req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {current_token(token)}", "Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=180) as r: d = json.load(r)
             if (d.get("promptFeedback") or {}).get("blockReason"): return "reject", f"blocked:{d['promptFeedback']['blockReason']}"
             c = d.get("candidates") or []
@@ -44,7 +50,11 @@ def gemini(model, flac_bytes, token, tries=6):
             return (lab.strip().lower() if isinstance(lab, str) else None), None
         except urllib.error.HTTPError as e:
             msg = e.read().decode()[:200]
-            if e.code == 401: return None, "AUTH_EXPIRED"
+            if e.code == 401:
+                for _ in range(20):
+                    time.sleep(30)
+                    if current_token(token) != current_token.last_bad: break
+                current_token.last_bad = current_token(token); continue
             if e.code in (429, 500, 503, 504) and i < tries - 1: time.sleep(min(60, 3 * 2 ** i)); continue
             return None, f"http{e.code}:{msg}"
         except Exception as e:
@@ -57,7 +67,7 @@ def main():
     ap.add_argument("--per-class", type=int, default=120); ap.add_argument("--model", default="gemini-3.1-pro-preview")
     ap.add_argument("--pad", type=float, default=1.0); ap.add_argument("--workers", type=int, default=12); ap.add_argument("--seed", type=int, default=0); ap.add_argument("--ledger-name", default="pilot_labels.jsonl"); ap.add_argument("--reuse-cuts", action="store_true")
     a = ap.parse_args(); a.out.mkdir(parents=True, exist_ok=True); (a.out / "flac").mkdir(exist_ok=True)
-    rng = random.Random(a.seed); token = os.environ["GCS_TOKEN"]; hf = os.environ["HF_TOKEN"]
+    rng = random.Random(a.seed); token = os.environ.get("GCS_TOKEN", ""); hf = os.environ["HF_TOKEN"]
     by = defaultdict(list)
     for l in open(a.subset):
         r = json.loads(l); by[r["label"]].append(r)

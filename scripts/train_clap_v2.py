@@ -33,7 +33,7 @@ def main() -> int:
     ap.add_argument("--save-every", type=int, default=1000); ap.add_argument("--push-every", type=int, default=3000)
     ap.add_argument("--push-to", default=""); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--wait-for-prep", action="store_true", help="start when index has >= --min-rows and keep ingesting")
-    ap.add_argument("--min-rows", type=int, default=100_000); ap.add_argument("--precision", default="bf16", choices=["bf16","fp32"]); ap.add_argument("--max-steps", type=int, default=0); ap.add_argument("--tag", default=""); ap.add_argument("--overfit-n", type=int, default=0); ap.add_argument("--freeze-audio-steps", type=int, default=0, help="freeze audio_model (backbone) for the first N steps"); ap.add_argument("--total-rows", type=int, default=0, help="expected train rows once prep finishes (for step budget)")
+    ap.add_argument("--min-rows", type=int, default=100_000); ap.add_argument("--precision", default="bf16", choices=["bf16","fp32"]); ap.add_argument("--max-steps", type=int, default=0); ap.add_argument("--tag", default=""); ap.add_argument("--overfit-n", type=int, default=0); ap.add_argument("--eval-chunk", type=int, default=256); ap.add_argument("--freeze-audio-steps", type=int, default=0, help="freeze audio_model (backbone) for the first N steps"); ap.add_argument("--total-rows", type=int, default=0, help="expected train rows once prep finishes (for step budget)")
     a = ap.parse_args()
     import torch
     from transformers import ClapModel, ClapProcessor
@@ -94,8 +94,8 @@ def main() -> int:
     def evaluate(step):
         model.eval(); ce = class_embs(); correct = 0; per = defaultdict(lambda: [0, 0]); aes = []
         rows = random.Random(1).sample(eval_rows, min(6000, len(eval_rows)))
-        for i in range(0, len(rows), 256):
-            chunk = rows[i:i+256]
+        for i in range(0, len(rows), a.eval_chunk):
+            chunk = rows[i:i+a.eval_chunk]
             x = torch.from_numpy(np.stack([store.get(r) for r in chunk]).astype(np.float32)).unsqueeze(1).to(dev)
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 ae = model.get_audio_features(input_features=x, is_longer=torch.zeros(len(chunk), 1, dtype=torch.bool, device=dev))
