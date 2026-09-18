@@ -152,15 +152,39 @@ def producer(work: queue.Queue, download_q: queue.Queue,
                 download_q.put(None)
 
 
+MIN_SPEECH_RATIO = float(os.environ.get("T2A_MIN_SPEECH_RATIO", "0.05"))
+MIN_SPEECH_SECONDS = float(os.environ.get("T2A_MIN_SPEECH_SECONDS", "20"))
+
+
+def speech_stats(audio, sample_rate: int, vad_min_silence_ms: int) -> tuple[float, float]:
+    """(speech_seconds, total_seconds) via the same Silero VAD faster-whisper uses."""
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
+    total = len(audio) / sample_rate
+    spans = get_speech_timestamps(audio, VadOptions(min_silence_duration_ms=vad_min_silence_ms))
+    return sum((sp["end"] - sp["start"]) for sp in spans) / sample_rate, total
+
+
 def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id: int,
                 remaining: list[int], lock: threading.Lock, n_uploaders: int,
                 vad_filter: bool, vad_min_silence_ms: int) -> None:
+    from faster_whisper.audio import decode_audio
     for rel_path, local_path in iter(download_q.get, None):
         json_path = local_path.with_suffix(local_path.suffix + ".json")
         if json_path.exists():
             upload_q.put((rel_path, json_path))
             continue
         try:
+            # Gate on speech content first: a file that is almost all silence/room tone
+            # costs download + decode + VAD only, never a Whisper pass.
+            audio = decode_audio(str(local_path), sampling_rate=16000)
+            speech_s, total_s = speech_stats(audio, 16000, vad_min_silence_ms)
+            if total_s > 0 and (speech_s / total_s < MIN_SPEECH_RATIO or speech_s < MIN_SPEECH_SECONDS):
+                json_path.write_text("[]")
+                local_path.unlink(missing_ok=True)
+                upload_q.put((rel_path, json_path))
+                log(f"  [transcriber-{worker_id}] skipped (speech {speech_s:.0f}s / {total_s:.0f}s = "
+                    f"{100*speech_s/max(total_s,1e-6):.1f}%) {rel_path}")
+                continue
             # ASMR audio structurally has long non-speech stretches (trigger
             # sounds with no talking over them) mixed with speech -- VAD
             # skips those before they ever reach the decoder, rather than
@@ -172,7 +196,7 @@ def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id
             # (typically much larger) instance of that same gap, needing no
             # separate handling.
             segments, _info = model.transcribe(
-                str(local_path), word_timestamps=True,
+                audio, word_timestamps=True,
                 vad_filter=vad_filter,
                 vad_parameters={"min_silence_duration_ms": vad_min_silence_ms},
             )
@@ -196,9 +220,9 @@ def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id
         json_path = local_path.with_suffix(local_path.suffix + ".json")
         import json
         json_path.write_text(json.dumps(entries))
+        log(f"  [transcriber-{worker_id}] {rel_path}: {len(entries)} entries (speech {100*speech_s/max(total_s,1e-6):.0f}%)")
         local_path.unlink(missing_ok=True)  # audio already lives on the Hub; done with our copy
         upload_q.put((rel_path, json_path))  # uploader batches to 128-file Hub commits
-        log(f"  [transcriber-{worker_id}] {rel_path}: {len(entries)} entries")
     with lock:
         remaining[0] -= 1
         if remaining[0] == 0:
