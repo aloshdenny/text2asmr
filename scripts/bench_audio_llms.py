@@ -122,8 +122,16 @@ def run_generic_chat(mid, name, a, clips, trust=False, sys_prompt=None, max_new=
     """AutoModel + apply_chat_template(audio path) runners: AF-Next, MiDashengLM."""
     import torch; from transformers import AutoModel, AutoProcessor, AutoModelForCausalLM
     proc = AutoProcessor.from_pretrained(mid, trust_remote_code=trust)
-    try: model = AutoModel.from_pretrained(mid, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=trust).eval()
-    except Exception: model = AutoModelForCausalLM.from_pretrained(mid, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=trust).eval()
+    import transformers; from transformers import AutoConfig
+    cfg = AutoConfig.from_pretrained(mid, trust_remote_code=trust); arch = (getattr(cfg, "architectures", None) or [None])[0]
+    cls = getattr(transformers, arch, None) if arch else None
+    if cls is None or not hasattr(cls, "generate"):
+        for cand in ("ForConditionalGeneration", "ForCausalLM"):
+            if arch: cls = getattr(transformers, arch.split("For")[0].replace("Model", "") + cand, None)
+            if cls: break
+    if cls is None: cls = AutoModelForCausalLM
+    log(f"{name}: arch={arch} loading with {cls.__name__}")
+    model = cls.from_pretrained(mid, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=trust).eval()
     out = []
     for i, c in enumerate(clips):
         try:
