@@ -27,7 +27,7 @@ export DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 HF_HUB_DISABLE_XET=1
 export $(tr "\\0" "\\n" < /proc/1/environ | grep -E "^HF_TOKEN=" | xargs)
 apt-get update -qq && apt-get install -y -qq ffmpeg >/dev/null
 python -m pip install -q -U faster-whisper "huggingface_hub>=0.25" "numpy<2" nvidia-cudnn-cu12 nvidia-cublas-cu12 2>&1 | grep -vE "WARNING|notice" | tail -1
-export LD_LIBRARY_PATH=$(python -c "import os, nvidia.cublas.lib, nvidia.cudnn.lib; print(os.path.dirname(nvidia.cublas.lib.__file__) + ':' + os.path.dirname(nvidia.cudnn.lib.__file__))"):$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$(python -c "import nvidia.cublas.lib, nvidia.cudnn.lib; print(list(nvidia.cublas.lib.__path__)[0] + ':' + list(nvidia.cudnn.lib.__path__)[0])"):$LD_LIBRARY_PATH
 mkdir -p /workspace/t2a/scripts /workspace/t2a/text2asmr/data && cd /workspace/t2a
 echo {L.b64(HERE/'scripts/transcribe_audios2.py')} | base64 -d > scripts/transcribe_audios2.py
 echo {L.b64(HERE/'text2asmr/data/segment.py')} | base64 -d > text2asmr/data/segment.py; touch text2asmr/__init__.py text2asmr/data/__init__.py
