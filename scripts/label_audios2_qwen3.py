@@ -137,7 +137,11 @@ def label_vllm(a, rows, ledger, port=8000):
             try:
                 req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=300) as resp: d = json.load(resp)
-                txt = d["choices"][0]["message"]["content"]; return {"uid": r["uid"], "raw": txt.strip(), "label": parse(txt), "labeler": "qwen3-omni-30b-vllm"}
+                txt = d["choices"][0]["message"]["content"]; res = {"uid": r["uid"], "raw": txt.strip(), "label": parse(txt), "labeler": "qwen3-omni-30b-vllm"}
+                if a.delete_wav:
+                    try: os.remove(a.work / "wav" / (r["uid"].replace("/", "__") + ".wav"))
+                    except Exception: pass
+                return res
             except Exception as e:
                 if i == 3: return {"uid": r["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:80]}"}
                 time.sleep(3)
@@ -197,7 +201,7 @@ def stage_upload(a):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--work", type=Path, default=Path("/workspace/lab")); ap.add_argument("--stage", default="candidates,prep,label,upload")
     ap.add_argument("--workers", type=int, default=20); ap.add_argument("--bg-max", type=float, default=0.5); ap.add_argument("--model", default="Qwen/Qwen3-Omni-30B-A3B-Instruct")
-    ap.add_argument("--concurrency", type=int, default=32); ap.add_argument("--limit", type=int, default=0); ap.add_argument("--follow", action="store_true"); ap.add_argument("--chunk", type=int, default=5000)
+    ap.add_argument("--concurrency", type=int, default=32); ap.add_argument("--limit", type=int, default=0); ap.add_argument("--follow", action="store_true"); ap.add_argument("--chunk", type=int, default=5000); ap.add_argument("--delete-wav", action="store_true")
     a = ap.parse_args(); a.work.mkdir(parents=True, exist_ok=True)
     for st in a.stage.split(","): {"candidates": stage_candidates, "prep": stage_prep, "label": stage_label, "upload": stage_upload}[st](a)
 if __name__ == "__main__": main()
