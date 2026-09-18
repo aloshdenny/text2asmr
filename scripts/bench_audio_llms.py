@@ -168,22 +168,30 @@ def run_qwen3_omni(a, clips, mid="Qwen/Qwen3-Omni-30B-A3B-Instruct", name="qwen3
         except Exception as e: out.append({"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:100]}"})
         if i % 200 == 0: log(f"{name} {i}/{len(clips)} last={out[-1].get('raw')!r} err={out[-1].get('error')}")
     del model; torch.cuda.empty_cache(); return out
-def run_qwen3_omni_captioner(a, clips):
+def run_qwen3_omni_captioner(a, clips, bs=8):
+    """Batched captioning with incremental saves (resumable)."""
     import torch; from transformers import Qwen3OmniMoeForConditionalGeneration, Qwen3OmniMoeProcessor
-    mid = "Qwen/Qwen3-Omni-30B-A3B-Captioner"; proc = Qwen3OmniMoeProcessor.from_pretrained(mid); model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(mid, dtype=torch.bfloat16, device_map="cuda").eval()
-    out = []
-    for i, c in enumerate(clips):
+    mid = "Qwen/Qwen3-Omni-30B-A3B-Captioner"; proc = Qwen3OmniMoeProcessor.from_pretrained(mid); proc.tokenizer.padding_side = "left"; model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(mid, dtype=torch.bfloat16, device_map="cuda").eval()
+    part = a.work / "labels_qwen3-omni-captioner.partial.jsonl"; done = {}
+    if part.exists():
+        for l in open(part): r = json.loads(l); done[r["uid"]] = r
+    todo = [c for c in clips if c["uid"] not in done]; log(f"captioner: {len(done)} done, {len(todo)} todo, batch {bs}")
+    pf = open(part, "a"); t0 = time.time()
+    for i in range(0, len(todo), bs):
+        ch = todo[i:i + bs]
         try:
-            audio, sr = load_audio(c["wav"]); conv = [{"role": "user", "content": [{"type": "audio", "audio": c["wav"]}]}]
-            text = proc.apply_chat_template(conv, add_generation_prompt=True, tokenize=False)
-            inputs = proc(text=text, audio=[audio], return_tensors="pt", padding=True).to("cuda")
+            audios = [load_audio(c["wav"])[0] for c in ch]
+            texts = [proc.apply_chat_template([{"role": "user", "content": [{"type": "audio", "audio": c["wav"]}]}], add_generation_prompt=True, tokenize=False) for c in ch]
+            inputs = proc(text=texts, audio=audios, return_tensors="pt", padding=True).to("cuda")
             with torch.no_grad(): gen = model.generate(**inputs, return_audio=False, thinker_max_new_tokens=120, thinker_do_sample=False)
             if isinstance(gen, tuple): gen = gen[0]
-            resp = proc.batch_decode(gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
-            out.append({"uid": c["uid"], "raw": resp.strip(), "label": parse(resp)})
-        except Exception as e: out.append({"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:100]}"})
-        if i % 200 == 0: log(f"qwen3-omni-captioner {i}/{len(clips)} last={out[-1].get('raw')!r} err={out[-1].get('error')}")
-    del model; torch.cuda.empty_cache(); return out
+            resps = proc.batch_decode(gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            for c, resp in zip(ch, resps): r = {"uid": c["uid"], "raw": resp.strip(), "label": parse(resp)}; done[c["uid"]] = r; pf.write(json.dumps(r) + "\n")
+        except Exception as e:
+            for c in ch: r = {"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:100]}"}; done[c["uid"]] = r; pf.write(json.dumps(r) + "\n")
+        pf.flush()
+        if (i // bs) % 25 == 0: log(f"qwen3-omni-captioner {i + len(ch)}/{len(todo)} {(i + len(ch)) / (time.time() - t0):.2f} clips/s last={done[ch[-1]['uid']].get('raw', '')[:80]!r}")
+    del model; torch.cuda.empty_cache(); return [done[c["uid"]] for c in clips]
 MODELS = {"qwen3-omni-30b": run_qwen3_omni, "qwen3-omni-captioner": run_qwen3_omni_captioner, "qwen2-audio-7b": run_qwen2_audio, "voxtral-mini-3b": run_voxtral, "qwen2.5-omni-7b": run_qwen25_omni, "af-next": run_af_next, "af-next-think": run_af_next_think, "af3": run_af3, "midashenglm-7b": run_midasheng}
 
 def stage_label(a):
