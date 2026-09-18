@@ -12,6 +12,9 @@ echo "== label (vLLM if up, else HF batched)"
 # periodic uploader (every 30 min) alongside labeling
 (while true; do sleep 1800; python scripts/label_audios2_qwen3.py --stage upload >> /workspace/lab/upload.log 2>&1; done) &
 if curl -s http://127.0.0.1:8000/v1/models >/dev/null 2>&1; then python scripts/label_audios2_qwen3.py --stage label > /workspace/lab/label.log 2>&1
-else /workspace/venv5/bin/python scripts/label_audios2_qwen3.py --stage label > /workspace/lab/label.log 2>&1; fi
+else
+  echo "vLLM not up (see /workspace/lab/vllm.log); building HF fallback env"; (python -m venv /workspace/venv5 && /workspace/venv5/bin/pip install -q -U pip && /workspace/venv5/bin/pip install -q torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 && /workspace/venv5/bin/pip install -q -U transformers accelerate soundfile librosa "numpy<2" huggingface_hub) > /workspace/lab/venv5.log 2>&1
+  /workspace/venv5/bin/python scripts/label_audios2_qwen3.py --stage label > /workspace/lab/label.log 2>&1
+fi
 python scripts/label_audios2_qwen3.py --stage upload >> /workspace/lab/upload.log 2>&1
 echo PIPELINE_DONE
