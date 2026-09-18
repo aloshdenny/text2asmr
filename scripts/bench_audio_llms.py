@@ -15,7 +15,9 @@ TO_VOCAL = {"moaning": "reject", "normal speech": "reject", "silence": "reject",
 PROMPT = ("This is a short clip from an ASMR recording. Listen carefully. Which ONE label best describes the main sound in the clip? "
           "Choose exactly one from this list: " + ", ".join(CHOICES) + ". Answer with only the label, nothing else.")
 def parse(text: str):
-    t = (text or "").lower().strip().strip('."\'`*').replace("_", " ")
+    if text and "</think>" in text: text = text.split("</think>")[-1]
+    if text and "answer" in text.lower(): text = text.lower().split("answer")[-1]
+    t = (text or "").lower().strip().strip('."\'`*:').replace("_", " ")
     for c in sorted(CHOICES, key=len, reverse=True):
         if c in t: return c
     if "breath" in t: return "breathing"
@@ -116,7 +118,31 @@ def run_qwen25_omni(a, clips):
         if i % 200 == 0: log(f"qwen2.5-omni {i}/{len(clips)} last={out[-1].get('raw')!r}")
     del model; torch.cuda.empty_cache(); return out
 
-MODELS = {"qwen2-audio-7b": run_qwen2_audio, "voxtral-mini-3b": run_voxtral, "qwen2.5-omni-7b": run_qwen25_omni}
+def run_generic_chat(mid, name, a, clips, trust=False, sys_prompt=None, max_new=24):
+    """AutoModel + apply_chat_template(audio path) runners: AF-Next, MiDashengLM."""
+    import torch; from transformers import AutoModel, AutoProcessor, AutoModelForCausalLM
+    proc = AutoProcessor.from_pretrained(mid, trust_remote_code=trust)
+    try: model = AutoModel.from_pretrained(mid, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=trust).eval()
+    except Exception: model = AutoModelForCausalLM.from_pretrained(mid, torch_dtype=torch.bfloat16, device_map="cuda", trust_remote_code=trust).eval()
+    out = []
+    for i, c in enumerate(clips):
+        try:
+            conv = ([{"role": "system", "content": [{"type": "text", "text": sys_prompt}]}] if sys_prompt else []) + [{"role": "user", "content": [{"type": "audio", "path": c["wav"]}, {"type": "text", "text": PROMPT}]}]
+            try: batch = proc.apply_chat_template([conv], tokenize=True, add_generation_prompt=True, return_dict=True)
+            except Exception: batch = proc.apply_chat_template(conv, tokenize=True, add_generation_prompt=True, add_special_tokens=True, return_dict=True)
+            batch = {k: (v.to("cuda") if hasattr(v, "to") else v) for k, v in batch.items()}
+            with torch.no_grad(): gen = model.generate(**batch, max_new_tokens=max_new, do_sample=False)
+            n_in = batch["input_ids"].shape[1] if "input_ids" in batch else 0
+            resp = proc.batch_decode(gen[:, n_in:] if gen.shape[1] > n_in else gen, skip_special_tokens=True)[0]
+            out.append({"uid": c["uid"], "raw": resp.strip(), "label": parse(resp)})
+        except Exception as e: out.append({"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:100]}"})
+        if i % 200 == 0: log(f"{name} {i}/{len(clips)} last={out[-1].get('raw')!r} err={out[-1].get('error')}")
+    del model; torch.cuda.empty_cache(); return out
+def run_af_next(a, clips): return run_generic_chat("nvidia/audio-flamingo-next-hf", "af-next", a, clips)
+def run_af_next_think(a, clips): return run_generic_chat("nvidia/audio-flamingo-next-think-hf", "af-next-think", a, clips, max_new=400)
+def run_af3(a, clips): return run_generic_chat("nvidia/audio-flamingo-3-hf", "af3", a, clips)
+def run_midasheng(a, clips): return run_generic_chat("mispeech/midashenglm-7b", "midashenglm", a, clips, trust=True, sys_prompt="You are a helpful audio analysis assistant.")
+MODELS = {"qwen2-audio-7b": run_qwen2_audio, "voxtral-mini-3b": run_voxtral, "qwen2.5-omni-7b": run_qwen25_omni, "af-next": run_af_next, "af-next-think": run_af_next_think, "af3": run_af3, "midashenglm-7b": run_midasheng}
 
 def stage_label(a):
     clips = json.load(open(a.work / "clips.json"))
@@ -184,7 +210,7 @@ def stage_score(a):
     log("SCORE_DONE")
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--work", type=Path, default=Path("/workspace/bench")); ap.add_argument("--stage", default="cut,label,score"); ap.add_argument("--models", default="qwen2-audio-7b,voxtral-mini-3b,qwen2.5-omni-7b")
+    ap = argparse.ArgumentParser(); ap.add_argument("--work", type=Path, default=Path("/workspace/bench")); ap.add_argument("--stage", default="cut,label,score"); ap.add_argument("--models", default="af-next,qwen2.5-omni-7b,midashenglm-7b,af3,voxtral-mini-3b,qwen2-audio-7b")
     a = ap.parse_args(); a.work.mkdir(parents=True, exist_ok=True)
     if "cut" in a.stage and not (a.work / "clips.json").exists(): stage_cut(a)
     if "label" in a.stage: stage_label(a)

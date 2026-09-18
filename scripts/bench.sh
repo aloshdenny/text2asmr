@@ -2,7 +2,7 @@
 set -e
 export $(tr "\0" "\n" < /proc/1/environ | grep -E "^HF_TOKEN=" | xargs); export HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 cd /workspace/t2a
-python -m pip install -q -U "transformers>=4.57,<5" accelerate soundfile librosa "numpy<2" 2>&1 | grep -vE "WARNING|notice" | tail -1
+python -m pip install -q -U "transformers<5" accelerate soundfile librosa "numpy<2" torchvision 2>&1 | grep -vE "WARNING|notice" | tail -1
 python -c "import transformers; print('transformers', transformers.__version__)"
 python scripts/bench_audio_llms.py --stage cut,label,score > /workspace/bench.log 2>&1 || true
 tail -5 /workspace/bench.log | cut -c1-300
