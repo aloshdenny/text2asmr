@@ -150,7 +150,41 @@ def run_af_next(a, clips): return run_generic_chat("nvidia/audio-flamingo-next-h
 def run_af_next_think(a, clips): return run_generic_chat("nvidia/audio-flamingo-next-think-hf", "af-next-think", a, clips, max_new=400)
 def run_af3(a, clips): return run_generic_chat("nvidia/audio-flamingo-3-hf", "af3", a, clips)
 def run_midasheng(a, clips): return run_generic_chat("mispeech/midashenglm-7b", "midashenglm", a, clips, trust=True, sys_prompt="You are a helpful audio analysis assistant.")
-MODELS = {"qwen2-audio-7b": run_qwen2_audio, "voxtral-mini-3b": run_voxtral, "qwen2.5-omni-7b": run_qwen25_omni, "af-next": run_af_next, "af-next-think": run_af_next_think, "af3": run_af3, "midashenglm-7b": run_midasheng}
+def run_qwen3_omni(a, clips, mid="Qwen/Qwen3-Omni-30B-A3B-Instruct", name="qwen3-omni"):
+    import torch; from transformers import Qwen3OmniMoeForConditionalGeneration, Qwen3OmniMoeProcessor
+    proc = Qwen3OmniMoeProcessor.from_pretrained(mid); model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(mid, dtype=torch.bfloat16, device_map="cuda").eval()
+    try: model.disable_talker()
+    except Exception as e: log(f"disable_talker: {e}")
+    out = []
+    for i, c in enumerate(clips):
+        try:
+            audio, sr = load_audio(c["wav"]); conv = [{"role": "user", "content": [{"type": "audio", "audio": c["wav"]}, {"type": "text", "text": PROMPT}]}]
+            text = proc.apply_chat_template(conv, add_generation_prompt=True, tokenize=False)
+            inputs = proc(text=text, audio=[audio], return_tensors="pt", padding=True).to("cuda")
+            with torch.no_grad(): gen = model.generate(**inputs, return_audio=False, thinker_max_new_tokens=24, thinker_do_sample=False)
+            if isinstance(gen, tuple): gen = gen[0]
+            resp = proc.batch_decode(gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
+            out.append({"uid": c["uid"], "raw": resp.strip(), "label": parse(resp)})
+        except Exception as e: out.append({"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:100]}"})
+        if i % 200 == 0: log(f"{name} {i}/{len(clips)} last={out[-1].get('raw')!r} err={out[-1].get('error')}")
+    del model; torch.cuda.empty_cache(); return out
+def run_qwen3_omni_captioner(a, clips):
+    import torch; from transformers import Qwen3OmniMoeForConditionalGeneration, Qwen3OmniMoeProcessor
+    mid = "Qwen/Qwen3-Omni-30B-A3B-Captioner"; proc = Qwen3OmniMoeProcessor.from_pretrained(mid); model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(mid, dtype=torch.bfloat16, device_map="cuda").eval()
+    out = []
+    for i, c in enumerate(clips):
+        try:
+            audio, sr = load_audio(c["wav"]); conv = [{"role": "user", "content": [{"type": "audio", "audio": c["wav"]}]}]
+            text = proc.apply_chat_template(conv, add_generation_prompt=True, tokenize=False)
+            inputs = proc(text=text, audio=[audio], return_tensors="pt", padding=True).to("cuda")
+            with torch.no_grad(): gen = model.generate(**inputs, return_audio=False, thinker_max_new_tokens=120, thinker_do_sample=False)
+            if isinstance(gen, tuple): gen = gen[0]
+            resp = proc.batch_decode(gen[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
+            out.append({"uid": c["uid"], "raw": resp.strip(), "label": parse(resp)})
+        except Exception as e: out.append({"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:100]}"})
+        if i % 200 == 0: log(f"qwen3-omni-captioner {i}/{len(clips)} last={out[-1].get('raw')!r} err={out[-1].get('error')}")
+    del model; torch.cuda.empty_cache(); return out
+MODELS = {"qwen3-omni-30b": run_qwen3_omni, "qwen3-omni-captioner": run_qwen3_omni_captioner, "qwen2-audio-7b": run_qwen2_audio, "voxtral-mini-3b": run_voxtral, "qwen2.5-omni-7b": run_qwen25_omni, "af-next": run_af_next, "af-next-think": run_af_next_think, "af3": run_af3, "midashenglm-7b": run_midasheng}
 
 def stage_label(a):
     clips = json.load(open(a.work / "clips.json"))
