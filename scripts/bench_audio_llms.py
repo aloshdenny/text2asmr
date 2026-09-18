@@ -138,7 +138,7 @@ def run_generic_chat(mid, name, a, clips, trust=False, sys_prompt=None, max_new=
             conv = ([{"role": "system", "content": [{"type": "text", "text": sys_prompt}]}] if sys_prompt else []) + [{"role": "user", "content": [{"type": "audio", "path": c["wav"]}, {"type": "text", "text": PROMPT}]}]
             try: batch = proc.apply_chat_template([conv], tokenize=True, add_generation_prompt=True, return_dict=True)
             except Exception: batch = proc.apply_chat_template(conv, tokenize=True, add_generation_prompt=True, add_special_tokens=True, return_dict=True)
-            batch = {k: (v.to("cuda") if hasattr(v, "to") else v) for k, v in batch.items()}
+            batch = {k: ((v.to("cuda", dtype=torch.bfloat16) if (hasattr(v, "is_floating_point") and v.is_floating_point()) else v.to("cuda")) if hasattr(v, "to") else v) for k, v in batch.items()}
             with torch.no_grad(): gen = model.generate(**batch, max_new_tokens=max_new, do_sample=False)
             n_in = batch["input_ids"].shape[1] if "input_ids" in batch else 0
             resp = proc.batch_decode(gen[:, n_in:] if gen.shape[1] > n_in else gen, skip_special_tokens=True)[0]
