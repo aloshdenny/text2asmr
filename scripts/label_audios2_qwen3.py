@@ -164,17 +164,30 @@ def label_hf(a, rows, ledger, bs=8):
             for r in ch: ledger.write(json.dumps({"uid": r["uid"], "raw": None, "label": None, "error": f"{type(e).__name__}: {str(e)[:80]}"}) + "\n")
         if (i // bs) % 50 == 0: ledger.flush(); log(f"label {i+len(ch)}/{len(rows)} {(i+len(ch))/(time.time()-t0):.2f} clips/s")
 def stage_label(a):
-    rows = [json.loads(l) for l in open(a.work / "clap_index.jsonl")]
     led = a.work / "labels.jsonl"; done = set()
     if led.exists():
-        for l in open(led): done.add(json.loads(l)["uid"])
-    rows = [r for r in rows if r["uid"] not in done]
-    rows.sort(key=lambda r: -(r["clap_top_p"] * (1 - r["clap_bg"])))   # most-likely-positive first
-    if a.limit: rows = rows[: a.limit]
-    log(f"label: {len(done)} done, {len(rows)} todo (backend={'vllm' if vllm_up() else 'hf'})")
+        for l in open(led):
+            try: done.add(json.loads(l)["uid"])
+            except Exception: pass
+    backend = "vllm" if vllm_up() else "hf"; log(f"label: {len(done)} done, backend={backend}, follow={a.follow}")
     with open(led, "a") as ledger:
-        if vllm_up(): label_vllm(a, rows, ledger)
-        else: label_hf(a, rows, ledger)
+        while True:
+            rows = []
+            for l in open(a.work / "clap_index.jsonl"):
+                try: r = json.loads(l)
+                except Exception: continue
+                if r["uid"] not in done: rows.append(r)
+            rows.sort(key=lambda r: -(r["clap_top_p"] * (1 - r["clap_bg"])))   # most-likely-positive first
+            if a.limit: rows = rows[: a.limit]
+            prep_done = (a.work / "prep.log").exists() and "PREP_DONE" in open(a.work / "prep.log").read()[-2000:]
+            if not rows:
+                if not a.follow or prep_done: break
+                time.sleep(60); continue
+            chunk = rows[: a.chunk] if a.follow else rows
+            log(f"label: {len(chunk)} clips this round ({len(rows)} pending, {len(done)} done)")
+            (label_vllm if backend == "vllm" else label_hf)(a, chunk, ledger); ledger.flush()
+            for r in chunk: done.add(r["uid"])
+            if not a.follow: break
     log("LABEL_DONE")
 def stage_upload(a):
     from huggingface_hub import HfApi
@@ -184,7 +197,7 @@ def stage_upload(a):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--work", type=Path, default=Path("/workspace/lab")); ap.add_argument("--stage", default="candidates,prep,label,upload")
     ap.add_argument("--workers", type=int, default=20); ap.add_argument("--bg-max", type=float, default=0.5); ap.add_argument("--model", default="Qwen/Qwen3-Omni-30B-A3B-Instruct")
-    ap.add_argument("--concurrency", type=int, default=32); ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--concurrency", type=int, default=32); ap.add_argument("--limit", type=int, default=0); ap.add_argument("--follow", action="store_true"); ap.add_argument("--chunk", type=int, default=5000)
     a = ap.parse_args(); a.work.mkdir(parents=True, exist_ok=True)
     for st in a.stage.split(","): {"candidates": stage_candidates, "prep": stage_prep, "label": stage_label, "upload": stage_upload}[st](a)
 if __name__ == "__main__": main()
