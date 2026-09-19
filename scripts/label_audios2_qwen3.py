@@ -94,6 +94,7 @@ def stage_prep(a):
     clap = Clap(); (a.work / "wav").mkdir(exist_ok=True); idx = open(a.work / "clap_index.jsonl", "a"); done_f = open(done_p, "a"); lock = threading.Lock()
     bg_i = clap.classes.index("__bg__"); stats = Counter(); t0 = time.time()
     def one(src):
+        """Download + decode one source (int16), cut clips as independent copies, write 16 kHz wavs; return small payloads only."""
         rows = by_src[src]; local = None; out = []
         try:
             for i in range(5):
@@ -102,38 +103,39 @@ def stage_prep(a):
                     if i == 4: raise
                     time.sleep(5 * 2 ** i)
             cmd = ["ffmpeg", "-v", "error", "-threads", "2", "-i", local, "-f", "s16le", "-ac", "1", "-ar", str(SR), "-"]
-            wav = np.frombuffer(subprocess.run(cmd, capture_output=True, check=True, timeout=900).stdout, dtype=np.int16)
+            raw = subprocess.run(cmd, capture_output=True, check=True, timeout=900).stdout
+            wav = np.frombuffer(raw, dtype=np.int16); import soundfile as sf
             for r in rows:
                 s0 = int(r["cut_start"] * SR); seg = wav[s0: s0 + int(r["cut_duration"] * SR)]
                 if seg.size < SR // 2: continue
-                out.append((r, seg.astype(np.float32) / 32768.0))
-            del wav
+                fp = a.work / "wav" / (r["uid"].replace("/", "__") + ".wav"); sf.write(fp, seg[::3], 16000, subtype="PCM_16")
+                out.append((r, repeatpad(seg.astype(np.float32) / 32768.0)))
+            del wav, raw
         except Exception as e: log(f"src fail {src[:50]}: {type(e).__name__}")
         finally:
             if local and os.path.exists(local): os.remove(local)
         return src, out
+    from concurrent.futures import as_completed
+    pending = set(); it = iter(todo)
+    def submit_more(ex):
+        while len(pending) < a.workers + 2:
+            try: pending.add(ex.submit(one, next(it)))
+            except StopIteration: return
     with ThreadPoolExecutor(a.workers) as ex:
-        for src, out in ex.map(one, todo):
-          try:
+        submit_more(ex)
+        while pending:
+            fut = next(as_completed(pending)); pending.discard(fut); src, out = fut.result(); submit_more(ex)
             keep = []
             for i in range(0, len(out), 64):
-                ch = out[i:i+64]; P = clap.probs(np.stack([repeatpad(seg) for _, seg in ch]))
-                for (r, seg), p in zip(ch, P):
+                ch = out[i:i+64]; P = clap.probs(np.stack([x for _, x in ch]))
+                for (r, _), p in zip(ch, P):
                     pbg = float(p[bg_i]); best = int(np.argmax(p[:bg_i])); stats["seen"] += 1
-                    if pbg < a.bg_max:
-                        fp = wav_path(a.work, r["uid"])
-                        try:
-                            seg16 = seg[::3]; import soundfile as sf; sf.write(fp, seg16, 16000, subtype="PCM_16")
-                        except Exception as e: log(f"wav write fail {r['uid'][:60]}: {type(e).__name__}"); continue
-                        keep.append({**{k: r[k] for k in ("uid", "source", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
-            with lock:
-                for k in keep: idx.write(json.dumps(k) + "\n")
-                idx.flush(); done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1
-                if stats["src"] % 100 == 0:
-                    el = time.time() - t0; log(f"prep {stats['src']}/{len(todo)} src, seen={stats['seen']} kept={stats['kept']} ({100*stats['kept']/max(1,stats['seen']):.0f}%) {stats['src']/el*60:.0f} src/min ETA {(len(todo)-stats['src'])/max(1e-6,stats['src']/el)/60:.0f} min")
-          except Exception as e:
-            log(f"source post-process fail {src[:60]}: {type(e).__name__}: {str(e)[:100]}")
-            with lock: done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1
+                    keep.append({**{k: r[k] for k in ("uid", "source", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
+            del out
+            for k in keep: idx.write(json.dumps(k) + "\n")
+            idx.flush(); done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1
+            if stats["src"] % 100 == 0:
+                el = time.time() - t0; log(f"prep {stats['src']}/{len(todo)} src, seen={stats['seen']} {stats['src']/el*60:.0f} src/min ETA {(len(todo)-stats['src'])/max(1e-6,stats['src']/el)/60:.0f} min")
     log(f"PREP_DONE {dict(stats)}")
 
 # ---------- stage: label ----------
