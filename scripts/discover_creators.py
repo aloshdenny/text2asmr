@@ -9,6 +9,9 @@ QUERIES = {
     "moaning": ["moaning", "moans", "whimpering", "heavy moaning", "moaning only", "orgasm sounds", "whimpers"],
     "mouth sounds": ["mouth sounds", "wet sounds", "licking", "ear licking", "lip smacking", "sloppy", "slurping", "tongue"],
     "breathing": ["heavy breathing", "breathing", "panting", "breathy"],
+    # breadth: gender/genre queries (deficit tags only lift yield ~1.3x, so NEW creators are what scales the corpus)
+    "_generic_f": ["F4M", "F4A", "F4F", "girlfriend", "gfe", "mommy", "wife", "older woman", "comfort", "sleep aid", "cuddles", "roleplay", "script fill", "asmr", "whisper", "gentle fdom", "praise", "teasing"],
+    "_generic_m": ["M4F", "M4A", "M4M", "boyfriend", "bfe", "daddy", "husband", "older man", "male moaning", "mdom", "gentle mdom", "comfort m4f", "sleep aid m4f", "roleplay m4f", "script fill m4f", "whisper m4f", "praise m4f", "aftercare m4f"],
 }
 TAGPAT = {"kissing": r"kiss|mwah|smooch|makeout|making out", "moaning": r"moan|whimper|orgasm", "mouth sounds": r"mouth|wet sound|lick|slurp|sloppy|tongue|smack", "breathing": r"breath|pant"}
 def route(cat: str, title: str):
@@ -32,7 +35,7 @@ def search(q, pages, sleep=0.6):
         time.sleep(sleep)
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--exclude", required=True); ap.add_argument("--pages", type=int, default=150); ap.add_argument("--out", default="expansion_plan.jsonl")
-    ap.add_argument("--min-posts", type=int, default=4); ap.add_argument("--cap-files", type=int, default=40); ap.add_argument("--mb-per-min", type=float, default=0.75)
+    ap.add_argument("--min-posts", type=int, default=0); ap.add_argument("--min-seen", type=int, default=3); ap.add_argument("--cap-files", type=int, default=150); ap.add_argument("--mb-per-min", type=float, default=0.75)
     a = ap.parse_args(); excluded = {l.split("\t")[0].strip().lower() for l in open(a.exclude) if l.strip()}
     posts = {}; t0 = time.time()
     for label, qs in QUERIES.items():
@@ -53,7 +56,7 @@ def main():
                 if re.search(pat, text): hits[lab] += 1
             r = route(it.get("category"), it.get("title")); routes[r or "?"] += 1; mins += (it.get("duration") or 0)
         matched = sum(hits.values())
-        if matched < a.min_posts: continue
+        if matched < a.min_posts or len(its) < a.min_seen: continue
         repo = routes.most_common(1)[0][0]
         if repo == "?": continue
         take = min(len(its), a.cap_files); est_gb = mins / max(1, len(its)) * take * a.mb_per_min / 1024
