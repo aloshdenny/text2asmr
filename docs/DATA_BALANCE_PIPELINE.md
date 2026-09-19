@@ -62,13 +62,17 @@ after applying the 3%-per-creator cap. This is the only input to discovery, so a
   lists into `label_tool/v2/existing_creators.txt`; the discovery script refuses any uploader in it.
 - Ranking: for each new creator, score = (#posts hitting deficit tags) x (deficit weight of those labels); keep creators with >= 8
   matching posts; **cap 40 files / 4 GB per creator** so the expansion adds breadth (new creators) not depth.
-- Gender/format balance: keep the F4M/M4F/F4F/M4M tag ratio close to the existing corpus (audios3 was the male-voice expansion).
+- Gender balance: deficits are computed **per repo** (female/audios2 and male/audios3 separately), so kissing/moaning get filled on both sides; the voice tag decides the destination repo (see 2.3).
 - Output: `expansion_plan.jsonl` (creator, post URLs, predicted label contributions, GB). Stop adding creators when the projected
   contribution covers every deficit or the byte budget is reached.
 
 ### 2.3 Acquire (DO box for downloads; `scripts/acquire_stream.py`)
-- Stream one file at a time: download -> push to **`aoxo/audios4`** (new repo; keeps provenance and shard keys clean) -> delete
-  local. The droplet has ~15 GB disk and 1 vCPU, so it must never hold more than a few files; at ~8 MB/s a 1 TB expansion is ~35 h
+- Stream one file at a time: download -> push to **`aoxo/audios2` (female voice) or `aoxo/audios3` (male voice)** -> delete
+  local. The repo is the gender axis and stays that way: route by the post's voice tag (`F4M`/`F4F`/`F4A`/`F4TF` -> audios2;
+  `M4F`/`M4M`/`M4A` -> audios3; multi-voice tags like `FF4M`/`MF4F` -> the leading voice letter; posts with no voice tag are
+  checked against the creator's other posts, and skipped if still ambiguous). Provenance lives in `expansion_manifest.jsonl`
+  (creator, file, tags, source query, batch), not in the repo name; new creators land under their own `<creator>/` prefix like
+  every existing one, so sharding, transcription resume (`<file>.json` present => done) and labeling work unchanged. The droplet has ~15 GB disk and 1 vCPU, so it must never hold more than a few files; at ~8 MB/s a 1 TB expansion is ~35 h
   of wall-clock. If that is too slow, a RunPod CPU pod (~$0.10/h, 200 GB disk) does it in a few hours.
 - Byte budget: ~1 TB total across audios2+audios3 expansion, allocated in proportion to deficits (kissing/moaning first).
 - Record `expansion_manifest.jsonl` (creator, file, size, tags, source query) so every file traces back to the deficit it serves.
@@ -86,7 +90,7 @@ after applying the 3%-per-creator cap. This is the only input to discovery, so a
 - Prompt lists `moaning` and `normal speech` explicitly (the old prompt folded both into "reject", which is why v1-v3 never had them).
 
 ### 2.6 Build the balanced training set (`scripts/build_clap_v2_subset.py` successor)
-- Union of Pro labels (8.6k, highest quality) + Qwen3 labels (audios2 + audios3 + audios4).
+- Union of Pro labels (8.6k, highest quality) + Qwen3 labels (audios2 + audios3, including the expansion files).
 - Per label: cap at target, **3% per-creator cap**, alpha=0.5 tempering for anything still uneven, `normal speech` + `silence` as
   explicit negatives, whispering capped at 300k.
 - Splits by **creator** (not clip, not file): 20% of creators held out. Also keep the Pro held-out set as the fixed yardstick.
