@@ -210,9 +210,15 @@ def stage_label(a):
             if not a.follow: break
     log("LABEL_DONE")
 def stage_upload(a):
-    from huggingface_hub import HfApi
-    HfApi().upload_file(path_or_fileobj=str(a.work / "labels.jsonl"), path_in_repo="v2/audios2_qwen3omni_labels.jsonl", repo_id="aoxo/clap-ft-data", repo_type="dataset", commit_message="audios2 Qwen3-Omni non-speech labels (incremental)")
-    if (a.work / "clap_index.jsonl").exists(): HfApi().upload_file(path_or_fileobj=str(a.work / "clap_index.jsonl"), path_in_repo="v2/audios2_clap_gate_index.jsonl", repo_id="aoxo/clap-ft-data", repo_type="dataset", commit_message="audios2 CLAP-v3 gate index")
+    import shutil; from huggingface_hub import HfApi
+    api = HfApi(); snap = a.work / "snap"; snap.mkdir(exist_ok=True)
+    for name, dst in (("labels.jsonl", "v2/audios2_qwen3omni_labels.jsonl"), ("clap_index.jsonl", "v2/audios2_clap_gate_index.jsonl")):
+        src = a.work / name
+        if not src.exists(): continue
+        shutil.copyfile(src, snap / name)   # frozen snapshot so the upload never races the writer
+        for i in range(3):
+            try: api.upload_file(path_or_fileobj=str(snap / name), path_in_repo=dst, repo_id="aoxo/clap-ft-data", repo_type="dataset", commit_message=f"audios2 {name} (incremental)"); log(f"uploaded {name} ({sum(1 for _ in open(snap / name))} rows)"); break
+            except Exception as e: log(f"upload {name} retry {i}: {str(e)[:120]}"); time.sleep(60)
     log("UPLOAD_DONE")
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--work", type=Path, default=Path("/workspace/lab")); ap.add_argument("--stage", default="candidates,prep,label,upload")
