@@ -94,12 +94,13 @@ def stage_prep(a):
                 except Exception:
                     if i == 4: raise
                     time.sleep(5 * 2 ** i)
-            cmd = ["ffmpeg", "-v", "error", "-threads", "2", "-i", local, "-f", "f32le", "-ac", "1", "-ar", str(SR), "-"]
-            wav = np.frombuffer(subprocess.run(cmd, capture_output=True, check=True, timeout=900).stdout, dtype=np.float32)
+            cmd = ["ffmpeg", "-v", "error", "-threads", "2", "-i", local, "-f", "s16le", "-ac", "1", "-ar", str(SR), "-"]
+            wav = np.frombuffer(subprocess.run(cmd, capture_output=True, check=True, timeout=900).stdout, dtype=np.int16)
             for r in rows:
                 s0 = int(r["cut_start"] * SR); seg = wav[s0: s0 + int(r["cut_duration"] * SR)]
                 if seg.size < SR // 2: continue
-                out.append((r, seg))
+                out.append((r, seg.astype(np.float32) / 32768.0))
+            del wav
         except Exception as e: log(f"src fail {src[:50]}: {type(e).__name__}")
         finally:
             if local and os.path.exists(local): os.remove(local)
