@@ -8,6 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import numpy as np
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
+import hashlib
+def wav_path(work, uid):
+    p = work / "wav" / (hashlib.sha1(uid.encode()).hexdigest()[:28] + ".wav")
+    if not p.exists():
+        old = work / "wav" / (uid.replace("/", "__") + ".wav")
+        if old.exists(): return old
+    return p
 SR = 48000; FRAMES, MELS = 1001, 64; MERGE = {"breathing heavy": "breathing", "breathing close": "breathing"}
 CHOICES = ["kissing", "mouth sounds", "breathing", "whispering", "moaning", "normal speech", "silence", "tapping", "scratching", "crinkling", "brushing", "liquid", "other sound"]
 PROMPT = ("You are labeling a short clip from an ASMR recording. Listen and pick the ONE label that best describes the MAIN sound.\n"
@@ -107,20 +114,26 @@ def stage_prep(a):
         return src, out
     with ThreadPoolExecutor(a.workers) as ex:
         for src, out in ex.map(one, todo):
+          try:
             keep = []
             for i in range(0, len(out), 64):
                 ch = out[i:i+64]; P = clap.probs(np.stack([repeatpad(seg) for _, seg in ch]))
                 for (r, seg), p in zip(ch, P):
                     pbg = float(p[bg_i]); best = int(np.argmax(p[:bg_i])); stats["seen"] += 1
                     if pbg < a.bg_max:
-                        fp = a.work / "wav" / (r["uid"].replace("/", "__") + ".wav")
-                        seg16 = seg[::3]; import soundfile as sf; sf.write(fp, seg16, 16000, subtype="PCM_16")
+                        fp = wav_path(a.work, r["uid"])
+                        try:
+                            seg16 = seg[::3]; import soundfile as sf; sf.write(fp, seg16, 16000, subtype="PCM_16")
+                        except Exception as e: log(f"wav write fail {r['uid'][:60]}: {type(e).__name__}"); continue
                         keep.append({**{k: r[k] for k in ("uid", "source", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
             with lock:
                 for k in keep: idx.write(json.dumps(k) + "\n")
                 idx.flush(); done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1
                 if stats["src"] % 100 == 0:
                     el = time.time() - t0; log(f"prep {stats['src']}/{len(todo)} src, seen={stats['seen']} kept={stats['kept']} ({100*stats['kept']/max(1,stats['seen']):.0f}%) {stats['src']/el*60:.0f} src/min ETA {(len(todo)-stats['src'])/max(1e-6,stats['src']/el)/60:.0f} min")
+          except Exception as e:
+            log(f"source post-process fail {src[:60]}: {type(e).__name__}: {str(e)[:100]}")
+            with lock: done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1
     log(f"PREP_DONE {dict(stats)}")
 
 # ---------- stage: label ----------
@@ -132,7 +145,7 @@ def label_vllm(a, rows, ledger, port=8000):
     import urllib.request
     from concurrent.futures import ThreadPoolExecutor
     def one(r):
-        b64 = base64.b64encode(open(a.work / "wav" / (r["uid"].replace("/", "__") + ".wav"), "rb").read()).decode()
+        b64 = base64.b64encode(open(wav_path(a.work, r["uid"]), "rb").read()).decode()
         body = {"model": a.model, "messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}}, {"type": "text", "text": PROMPT}]}], "max_tokens": 12, "temperature": 0}
         for i in range(4):
             try:
@@ -140,7 +153,7 @@ def label_vllm(a, rows, ledger, port=8000):
                 with urllib.request.urlopen(req, timeout=300) as resp: d = json.load(resp)
                 txt = d["choices"][0]["message"]["content"]; res = {"uid": r["uid"], "raw": txt.strip(), "label": parse(txt), "labeler": "qwen3-omni-30b-vllm"}
                 if a.delete_wav:
-                    try: os.remove(a.work / "wav" / (r["uid"].replace("/", "__") + ".wav"))
+                    try: os.remove(wav_path(a.work, r["uid"]))
                     except Exception: pass
                 return res
             except Exception as e:
@@ -159,7 +172,7 @@ def label_hf(a, rows, ledger, bs=8):
     for i in range(0, len(rows), bs):
         ch = rows[i:i+bs]
         try:
-            paths = [str(a.work / "wav" / (r["uid"].replace("/", "__") + ".wav")) for r in ch]; audios = [sf.read(p, dtype="float32")[0] for p in paths]
+            paths = [str(wav_path(a.work, r["uid"])) for r in ch]; audios = [sf.read(p, dtype="float32")[0] for p in paths]
             texts = [proc.apply_chat_template([{"role": "user", "content": [{"type": "audio", "audio": p}, {"type": "text", "text": PROMPT}]}], add_generation_prompt=True, tokenize=False) for p in paths]
             inputs = proc(text=texts, audio=audios, return_tensors="pt", padding=True).to("cuda")
             with torch.no_grad(): gen = model.generate(**inputs, return_audio=False, thinker_max_new_tokens=12, thinker_do_sample=False)
