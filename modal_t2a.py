@@ -17,7 +17,7 @@ transcribe_image = (modal.Image.debian_slim(python_version="3.11").apt_install("
 
 label_image = (modal.Image.from_registry("nvidia/cuda:12.9.1-devel-ubuntu22.04", add_python="3.11").apt_install("ffmpeg", "ninja-build", "curl")
     .pip_install("uv")
-    .run_commands('uv pip install --system --index-strategy unsafe-best-match "https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl" --extra-index-url https://download.pytorch.org/whl/cu129 qwen-omni-utils soundfile "numpy<2" huggingface_hub ninja')
+    .run_commands('uv pip install --system --index-strategy unsafe-best-match "https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl" --extra-index-url https://download.pytorch.org/whl/cu129 qwen-omni-utils soundfile huggingface_hub ninja')
     .env({**ENV, "VLLM_USE_FLASHINFER_SAMPLER": "0"})
     .add_local_dir(str(REPO_DIR / "scripts"), remote_path="/root/t2a/scripts")
     .add_local_dir(str(REPO_DIR / "text2asmr"), remote_path="/root/t2a/text2asmr"))
