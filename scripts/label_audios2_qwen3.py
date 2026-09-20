@@ -91,8 +91,8 @@ def stage_prep(a):
     for r in cands: by_src[r["source"]].append(r)
     done_p = a.work / "prep_done_sources.txt"; done = set(done_p.read_text().split()) if done_p.exists() else set()
     todo = [s for s in by_src if s not in done]; log(f"prep: {len(by_src)} sources, {len(done)} done, {len(todo)} todo")
-    clap = Clap(); (a.work / "wav").mkdir(exist_ok=True); idx = open(a.work / "clap_index.jsonl", "a"); done_f = open(done_p, "a"); lock = threading.Lock()
-    bg_i = clap.classes.index("__bg__"); stats = Counter(); t0 = time.time()
+    clap = None if a.no_clap else Clap(); (a.work / "wav").mkdir(exist_ok=True); idx = open(a.work / "clap_index.jsonl", "a"); done_f = open(done_p, "a"); lock = threading.Lock()
+    bg_i = clap.classes.index("__bg__") if clap else 0; stats = Counter(); t0 = time.time()
     def one(src):
         """Download + decode one source (int16), cut clips as independent copies, write 16 kHz wavs; return small payloads only."""
         rows = by_src[src]; local = None; out = []
@@ -109,7 +109,7 @@ def stage_prep(a):
                 s0 = int(r["cut_start"] * SR); seg = wav[s0: s0 + int(r["cut_duration"] * SR)]
                 if seg.size < SR // 2: continue
                 fp = a.work / "wav" / (r["uid"].replace("/", "__") + ".wav"); sf.write(fp, seg[::3], 16000, subtype="PCM_16")
-                out.append((r, repeatpad(seg.astype(np.float32) / 32768.0)))
+                out.append((r, None if a.no_clap else repeatpad(seg.astype(np.float32) / 32768.0)))
             del wav, raw
         except Exception as e: log(f"src fail {src[:50]}: {type(e).__name__}")
         finally:
@@ -127,10 +127,15 @@ def stage_prep(a):
             fut = next(as_completed(pending)); pending.discard(fut); src, out = fut.result(); submit_more(ex)
             keep = []
             for i in range(0, len(out), 64):
-                ch = out[i:i+64]; P = clap.probs(np.stack([x for _, x in ch]))
-                for (r, _), p in zip(ch, P):
-                    pbg = float(p[bg_i]); best = int(np.argmax(p[:bg_i])); stats["seen"] += 1
-                    keep.append({**{k: r.get(k) for k in ("uid", "source", "repo", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
+                ch = out[i:i+64]
+                if clap:
+                    P = clap.probs(np.stack([x for _, x in ch]))
+                    for (r, _), p in zip(ch, P):
+                        pbg = float(p[bg_i]); best = int(np.argmax(p[:bg_i])); stats["seen"] += 1
+                        keep.append({**{k: r.get(k) for k in ("uid", "source", "repo", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
+                else:
+                    for r, _ in ch:
+                        stats["seen"] += 1; keep.append({**{k: r.get(k) for k in ("uid", "source", "repo", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": 0.5, "clap_top": None, "clap_top_p": 0.5}); stats["kept"] += 1
             del out
             for k in keep: idx.write(json.dumps(k) + "\n")
             idx.flush(); done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1
@@ -212,7 +217,7 @@ def stage_label(a):
 def stage_upload(a):
     import shutil; from huggingface_hub import HfApi
     api = HfApi(); snap = a.work / "snap"; snap.mkdir(exist_ok=True)
-    for name, dst in (("labels.jsonl", "v2/audios2_qwen3omni_labels.jsonl"), ("clap_index.jsonl", "v2/audios2_clap_gate_index.jsonl")):
+    for name, dst in (("labels.jsonl", f"v2/{a.ledger_name}"), ("clap_index.jsonl", f"v2/{a.ledger_name.replace('_labels', '_index')}")):
         src = a.work / name
         if not src.exists(): continue
         shutil.copyfile(src, snap / name)   # frozen snapshot so the upload never races the writer
@@ -223,7 +228,7 @@ def stage_upload(a):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--work", type=Path, default=Path("/workspace/lab")); ap.add_argument("--stage", default="candidates,prep,label,upload")
     ap.add_argument("--workers", type=int, default=20); ap.add_argument("--bg-max", type=float, default=0.5); ap.add_argument("--model", default="Qwen/Qwen3-Omni-30B-A3B-Instruct")
-    ap.add_argument("--concurrency", type=int, default=32); ap.add_argument("--limit", type=int, default=0); ap.add_argument("--follow", action="store_true"); ap.add_argument("--chunk", type=int, default=5000); ap.add_argument("--delete-wav", action="store_true")
+    ap.add_argument("--concurrency", type=int, default=32); ap.add_argument("--limit", type=int, default=0); ap.add_argument("--follow", action="store_true"); ap.add_argument("--chunk", type=int, default=5000); ap.add_argument("--delete-wav", action="store_true"); ap.add_argument("--no-clap", action="store_true"); ap.add_argument("--ledger-name", default="audios2_qwen3omni_labels.jsonl")
     a = ap.parse_args(); a.work.mkdir(parents=True, exist_ok=True)
     for st in a.stage.split(","): {"candidates": stage_candidates, "prep": stage_prep, "label": stage_label, "upload": stage_upload}[st](a)
 if __name__ == "__main__": main()
