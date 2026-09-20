@@ -7,8 +7,8 @@ HERE = Path(__file__).resolve().parents[1]
 def main():
     key = os.environ["RUNPOD_API_KEY"]; token = os.environ["HF_TOKEN"]; pub = Path.home().joinpath(".ssh/id_ed25519.pub").read_text().strip()
     repo = os.environ.get("T2A_REPO", "aoxo/audios3"); shards = os.environ.get("T2A_SHARDS", "2"); idx = os.environ.get("T2A_SHARD", "1"); workers = os.environ.get("T2A_WORKERS", "4")
-    if os.environ.get("REUSE_POD") and Path("/tmp/t2a_transcribe_pod.json").exists():
-        j = json.loads(Path("/tmp/t2a_transcribe_pod.json").read_text()); return kick(j["host"], j["port"], repo, shards, idx, workers)
+    if os.environ.get("REUSE_POD") and Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).exists():
+        j = json.loads(Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).read_text()); return kick(j["host"], j["port"], repo, shards, idx, workers)
     pod = None
     for name in os.environ.get("T2A_PREFS", "RTX 4090,RTX A5000,RTX A6000,L40S").split(","):
         for cloud in ("SECURE", "COMMUNITY"):
@@ -17,10 +17,10 @@ def main():
         if pod: break
     if not pod: raise SystemExit("no GPU")
     host, port = L.wait_ssh(key, pod["id"]); print("SSH", host, port, flush=True)
-    Path("/tmp/t2a_transcribe_pod.json").write_text(json.dumps({"id": pod["id"], "host": host, "port": port}))
+    Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).write_text(json.dumps({"id": pod["id"], "host": host, "port": port}))
     kick(host, port, repo, shards, idx, workers)
 
-def kick(host, port, repo, shards, idx, workers):
+def kick(host, port, repo, shards, idx, workers, mode=os.environ.get("T2A_MODE", "shard")):
     remote = f"""
 set -e
 export DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 HF_HUB_DISABLE_XET=1
@@ -35,7 +35,21 @@ cat > /workspace/run_transcribe.sh <<EOF2
 #!/bin/bash
 export \\$(tr "\\0" "\\n" < /proc/1/environ | grep -E "^HF_TOKEN=" | xargs); export HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 PYTHONPATH=/workspace/t2a LD_LIBRARY_PATH=$LD_LIBRARY_PATH
 cd /workspace/t2a
-while true; do python scripts/transcribe_audios2.py --repo {repo} --model large-v3 --compute-type float16 --transcribe-workers {workers} --producer-workers {workers} --upload-batch-size 64 --upload-batch-timeout 1500 --num-shards {shards} --shard-index {idx}; echo "[\\$(date +%T)] exited rc=\\$?, restarting in 60s"; sleep 60; done
+if [ "{mode}" = "expansion" ]; then
+  # continuous: transcribe only newly-acquired creators (both repos), refreshing the creator list from the acquisition ledger
+  while true; do
+    python - <<'PY'
+import json; from huggingface_hub import hf_hub_download
+rows = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", "v2/acquired_snapshot.jsonl", repo_type="dataset", force_download=True))]
+for repo in ("audios2", "audios3"): open(f"/workspace/creators_{{repo}}.txt", "w").write("\\n".join(r["uploader"] for r in rows if r["repo"].endswith(repo) and r["files"] > 0) + "\\n")
+print("creators:", {{repo: sum(1 for r in rows if r["repo"].endswith(repo) and r["files"] > 0) for repo in ("audios2", "audios3")}})
+PY
+    for r in audios2 audios3; do python scripts/transcribe_audios2.py --repo aoxo/$r --model large-v3 --compute-type float16 --transcribe-workers {workers} --producer-workers {workers} --upload-batch-size 64 --upload-batch-timeout 1500 --creators-file /workspace/creators_$r.txt; done
+    echo "[\\$(date +%T)] expansion pass done, sleeping 10 min"; sleep 600
+  done
+else
+  while true; do python scripts/transcribe_audios2.py --repo {repo} --model large-v3 --compute-type float16 --transcribe-workers {workers} --producer-workers {workers} --upload-batch-size 64 --upload-batch-timeout 1500 --num-shards {shards} --shard-index {idx}; echo "[\\$(date +%T)] exited rc=\\$?, restarting in 60s"; sleep 60; done
+fi
 EOF2
 chmod +x /workspace/run_transcribe.sh
 setsid nohup /workspace/run_transcribe.sh > /workspace/transcribe.log 2>&1 < /dev/null &
