@@ -22,7 +22,7 @@ def main() -> int:
     ap.add_argument("--per-source-cap", type=int, default=60)
     ap.add_argument("--min-per-source", type=int, default=8)
     ap.add_argument("--rejects", type=int, default=60_000)
-    ap.add_argument("--eval-frac", type=float, default=0.02)
+    ap.add_argument("--eval-frac", type=float, default=0.02); ap.add_argument("--cap", type=int, default=0, help="hard per-class cap applied after tempered targets")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     rng = random.Random(a.seed)
@@ -64,6 +64,8 @@ def main() -> int:
         if not capped:
             for c in open_c: target[c] = int(remaining * w[c] / s)
             break
+    if a.cap:
+        target = {c: min(t, a.cap) for c, t in target.items()}
     # per-source cap: shuffle then take
     sel = []
     for c, rows in by_class.items():

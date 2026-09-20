@@ -98,7 +98,7 @@ def stage_prep(a):
         rows = by_src[src]; local = None; out = []
         try:
             for i in range(5):
-                try: local = hf_hub_download("aoxo/audios2", src, repo_type="dataset", local_dir=str(a.work / "tmp" / str(abs(hash(src)) % 64))); break
+                try: local = hf_hub_download(rows[0].get("repo") or "aoxo/audios2", src, repo_type="dataset", local_dir=str(a.work / "tmp" / str(abs(hash(src)) % 64))); break
                 except Exception:
                     if i == 4: raise
                     time.sleep(5 * 2 ** i)
@@ -130,7 +130,7 @@ def stage_prep(a):
                 ch = out[i:i+64]; P = clap.probs(np.stack([x for _, x in ch]))
                 for (r, _), p in zip(ch, P):
                     pbg = float(p[bg_i]); best = int(np.argmax(p[:bg_i])); stats["seen"] += 1
-                    keep.append({**{k: r[k] for k in ("uid", "source", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
+                    keep.append({**{k: r.get(k) for k in ("uid", "source", "repo", "start", "duration", "cut_start", "cut_duration", "old")}, "clap_bg": round(pbg, 4), "clap_top": clap.classes[best], "clap_top_p": round(float(p[best]), 4)}); stats["kept"] += 1
             del out
             for k in keep: idx.write(json.dumps(k) + "\n")
             idx.flush(); done_f.write(src + "\n"); done_f.flush(); stats["src"] += 1

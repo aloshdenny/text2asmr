@@ -4,8 +4,8 @@ from pathlib import Path
 import launch_clap_v2_pod as L
 HERE = Path(__file__).resolve().parents[1]
 def kick(host, port):
-    files = ["scripts/prep_clap_v2.py", "scripts/train_clap_v3.py", "scripts/pseudo_label_clap.py", "scripts/selftrain_clap.sh", "scripts/prep_yt_chapters.py", "scripts/clapv4.sh", "scripts/train_clap_v5.py", "scripts/clapv5.sh", "scripts/bench_audio_llms.py", "scripts/bench.sh", "scripts/bench3omni.sh", "scripts/label_audios2_qwen3.py", "scripts/label_audios2.sh"]
-    writes = "\n".join(f"echo {L.b64(HERE / f)} | base64 -d > /workspace/t2a/{f}" for f in files)
+    files = ["scripts/prep_clap_v2.py", "scripts/train_clap_v3.py", "scripts/pseudo_label_clap.py", "scripts/selftrain_clap.sh", "scripts/prep_yt_chapters.py", "scripts/clapv4.sh", "scripts/train_clap_v5.py", "scripts/clapv5.sh", "scripts/bench_audio_llms.py", "scripts/bench.sh", "scripts/bench3omni.sh", "scripts/label_audios2_qwen3.py", "scripts/label_audios2.sh", "scripts/candidates_from_transcripts.py", "scripts/yield_check.sh", "scripts/start_vllm_cu129.sh", "scripts/transcribe_audios2.py", "text2asmr/data/segment.py"]
+    writes = "\n".join(f"mkdir -p /workspace/t2a/{os.path.dirname(f)}; echo {L.b64(HERE / f)} | base64 -d > /workspace/t2a/{f}" for f in files) + "\ntouch /workspace/t2a/text2asmr/__init__.py /workspace/t2a/text2asmr/data/__init__.py; cp /workspace/t2a/scripts/start_vllm_cu129.sh /workspace/start_vllm_cu129.sh"
     remote = f"""
 set -e
 export DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 HF_HUB_DISABLE_XET=1
