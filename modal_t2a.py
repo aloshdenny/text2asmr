@@ -7,7 +7,7 @@ app = modal.App("t2a")
 HF = modal.Secret.from_name("t2a-hf")
 CACHE = modal.Volume.from_name("t2a-cache", create_if_missing=True)
 REPO_DIR = Path(__file__).parent
-ENV = {"HF_HUB_DISABLE_XET": "1", "PYTHONUNBUFFERED": "1", "PYTHONPATH": "/root/t2a", "HF_HOME": "/cache/hf"}
+ENV = {"HF_HUB_DISABLE_XET": "1", "PYTHONUNBUFFERED": "1", "PYTHONPATH": "/root/t2a", "HF_HOME": "/cache/hf", "T2A_WHISPER_BATCH": "16", "T2A_TW": "2"}
 
 transcribe_image = (modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg")
     .pip_install("faster-whisper", "huggingface_hub>=0.25", "numpy<2", "nvidia-cudnn-cu12", "nvidia-cublas-cu12")
@@ -29,20 +29,38 @@ def _ld():
 def _transcribe(repo, extra, budget_s=23 * 3600 - 900):
     env = {**os.environ, "LD_LIBRARY_PATH": _ld() + ":" + os.environ.get("LD_LIBRARY_PATH", "")}; t0 = time.time()
     while time.time() - t0 < budget_s:
-        rc = subprocess.run(["python", "/root/t2a/scripts/transcribe_audios2.py", "--repo", repo, "--model", "large-v3", "--compute-type", "float16", "--transcribe-workers", "3", "--producer-workers", "3",
+        rc = subprocess.run(["python", "/root/t2a/scripts/transcribe_audios2.py", "--repo", repo, "--model", "large-v3", "--compute-type", "float16", "--transcribe-workers", os.environ.get("T2A_TW", "2"), "--producer-workers", "4",
                              "--upload-batch-size", "64", "--upload-batch-timeout", "1500", *extra], cwd="/root/t2a", env=env).returncode
         print(f"transcribe {repo} {extra} exited rc={rc}; ", "done" if rc == 0 else "retrying in 60s", flush=True)
         if rc == 0: return
         time.sleep(60)
 
-@app.function(image=transcribe_image, gpu="L4", timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE}, schedule=modal.Period(hours=24))
-def audios3_shard0(): _transcribe("aoxo/audios3", ["--num-shards", "2", "--shard-index", "0"])
+TR = dict(image=transcribe_image, gpu="L4", cpu=8, memory=32768, timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE}, schedule=modal.Period(hours=24))
+@app.function(**TR)
+def audios3_shard0(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "0"])
+@app.function(**TR)
+def audios3_shard1(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "1"])
+@app.function(**TR)
+def audios3_shard2(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "2"])
+@app.function(**TR)
+def audios3_shard3(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "3"])
 
-@app.function(image=transcribe_image, gpu="L4", timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE}, schedule=modal.Period(hours=24))
-def audios3_shard1(): _transcribe("aoxo/audios3", ["--num-shards", "2", "--shard-index", "1"])
+def _expansion(idx, n):
+    from huggingface_hub import hf_hub_download
+    t0 = time.time()
+    while time.time() - t0 < 23 * 3600 - 1800:
+        rows = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", "v2/acquired_snapshot.jsonl", repo_type="dataset", force_download=True))]
+        for repo in ("audios2", "audios3"):
+            cs = [r["uploader"] for r in rows if r["repo"].endswith(repo) and r["files"] > 0]
+            Path(f"/tmp/creators_{repo}.txt").write_text("\n".join(cs) + "\n"); print(f"{repo}: {len(cs)} expansion creators (shard {idx}/{n})", flush=True)
+            if cs: _transcribe(f"aoxo/{repo}", ["--creators-file", f"/tmp/creators_{repo}.txt", "--num-shards", str(n), "--shard-index", str(idx)], budget_s=6 * 3600)
+        print("expansion pass done; sleeping 10 min", flush=True); time.sleep(600)
+@app.function(**TR)
+def expansion_transcribe(): _expansion(0, 2)
+@app.function(**TR)
+def expansion_transcribe1(): _expansion(1, 2)
 
-@app.function(image=transcribe_image, gpu="L4", timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE}, schedule=modal.Period(hours=24))
-def expansion_transcribe():
+def _old_expansion_transcribe():
     """Continuously transcribe newly-acquired creators (both repos), refreshing the creator list from the acquisition ledger."""
     from huggingface_hub import hf_hub_download
     t0 = time.time()

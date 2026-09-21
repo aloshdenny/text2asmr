@@ -153,6 +153,8 @@ def producer(work: queue.Queue, download_q: queue.Queue,
 
 
 MIN_SPEECH_RATIO = float(os.environ.get("T2A_MIN_SPEECH_RATIO", "0.05"))
+BATCH_SIZE = int(os.environ.get("T2A_WHISPER_BATCH", "16"))
+_PIPES: dict = {}
 MIN_SPEECH_SECONDS = float(os.environ.get("T2A_MIN_SPEECH_SECONDS", "20"))
 
 
@@ -195,11 +197,17 @@ def transcriber(model, download_q: queue.Queue, upload_q: queue.Queue, worker_id
             # words into a "silence" entry -- a VAD-skipped stretch is just a
             # (typically much larger) instance of that same gap, needing no
             # separate handling.
-            segments, _info = model.transcribe(
-                audio, word_timestamps=True,
-                vad_filter=vad_filter,
-                vad_parameters={"min_silence_duration_ms": vad_min_silence_ms},
-            )
+            if BATCH_SIZE > 0:
+                from faster_whisper import BatchedInferencePipeline
+                pipe = _PIPES.get(id(model)) or _PIPES.setdefault(id(model), BatchedInferencePipeline(model=model))
+                segments, _info = pipe.transcribe(audio, batch_size=BATCH_SIZE, word_timestamps=True, vad_filter=vad_filter,
+                                                  vad_parameters={"min_silence_duration_ms": vad_min_silence_ms})
+            else:
+                segments, _info = model.transcribe(
+                    audio, word_timestamps=True,
+                    vad_filter=vad_filter,
+                    vad_parameters={"min_silence_duration_ms": vad_min_silence_ms},
+                )
             entries = words_to_alignment(list(segments))
         except Exception as exc:  # noqa: BLE001 - one bad file must not kill the pipeline
             if "Invalid data found when processing input" in str(exc):
