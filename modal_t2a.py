@@ -35,7 +35,7 @@ def _transcribe(repo, extra, budget_s=23 * 3600 - 900):
         if rc == 0: return
         time.sleep(60)
 
-TR = dict(image=transcribe_image, gpu="L4", cpu=8, memory=32768, timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE}, schedule=modal.Period(hours=24))
+TR = dict(image=transcribe_image, gpu="L4", cpu=8, memory=32768, timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE})
 @app.function(**TR)
 def audios3_shard0(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "0"])
 @app.function(**TR)
@@ -72,7 +72,7 @@ def _old_expansion_transcribe():
             if cs: _transcribe(f"aoxo/{repo}", ["--creators-file", f"/tmp/creators_{repo}.txt"], budget_s=6 * 3600)
         print("expansion pass done; sleeping 10 min", flush=True); time.sleep(600)
 
-@app.function(image=label_image, gpu="A100-80GB", timeout=8 * 3600, secrets=[HF], volumes={"/cache": CACHE}, schedule=modal.Period(hours=24))
+@app.function(image=label_image, gpu="A100-80GB", cpu=12, memory=65536, timeout=8 * 3600, secrets=[HF], volumes={"/cache": CACHE})
 def label_new_transcripts():
     """Daily: gap clips from transcripts not yet labeled (expansion creators in both repos + audios3) -> Qwen3-Omni via vLLM -> HF ledgers."""
     from huggingface_hub import HfApi, hf_hub_download
@@ -117,6 +117,14 @@ def label_new_transcripts():
         api.upload_file(path_or_fileobj=str(out), path_in_repo=ledger, repo_id="aoxo/clap-ft-data", repo_type="dataset", commit_message=f"+{len(part)} Qwen3-Omni labels ({repo_key})")
         print(f"uploaded {ledger}: +{len(part)} (total {len(old) + len(part)})", flush=True)
     srv.kill(); print("LABEL_BATCH_DONE", flush=True)
+
+WORKERS = ["audios3_shard0", "audios3_shard1", "audios3_shard2", "audios3_shard3", "expansion_transcribe", "expansion_transcribe1", "label_new_transcripts"]
+
+@app.function(image=modal.Image.debian_slim(python_version="3.11"), schedule=modal.Period(hours=24), timeout=600)
+def dispatcher():
+    """The only scheduled function (plan limit): re-spawns every worker daily; workers self-limit to 23 h and resume from the Hub."""
+    for name in WORKERS:
+        fc = modal.Function.from_name("t2a", name).spawn(); print("spawned", name, fc.object_id, flush=True)
 
 @app.local_entrypoint()
 def main():
