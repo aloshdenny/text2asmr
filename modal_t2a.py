@@ -37,15 +37,10 @@ def _transcribe(repo, extra, budget_s=23 * 3600 - 900):
 
 TR = dict(image=transcribe_image, gpu="L4", cpu=8, memory=32768, timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE})
 @app.function(**TR)
-def audios3_shard0(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "0"])
-@app.function(**TR)
-def audios3_shard1(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "1"])
-@app.function(**TR)
-def audios3_shard2(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "2"])
-@app.function(**TR)
-def audios3_shard3(): _transcribe("aoxo/audios3", ["--num-shards", "4", "--shard-index", "3"])
+def audios3_shard(idx: int = 0, n: int = 8): _transcribe("aoxo/audios3", ["--num-shards", str(n), "--shard-index", str(idx)])
 
-def _expansion(idx, n):
+@app.function(**TR)
+def expansion_shard(idx: int = 0, n: int = 4):
     from huggingface_hub import hf_hub_download
     t0 = time.time()
     while time.time() - t0 < 23 * 3600 - 1800:
@@ -55,10 +50,6 @@ def _expansion(idx, n):
             Path(f"/tmp/creators_{repo}.txt").write_text("\n".join(cs) + "\n"); print(f"{repo}: {len(cs)} expansion creators (shard {idx}/{n})", flush=True)
             if cs: _transcribe(f"aoxo/{repo}", ["--creators-file", f"/tmp/creators_{repo}.txt", "--num-shards", str(n), "--shard-index", str(idx)], budget_s=6 * 3600)
         print("expansion pass done; sleeping 10 min", flush=True); time.sleep(600)
-@app.function(**TR)
-def expansion_transcribe(): _expansion(0, 2)
-@app.function(**TR)
-def expansion_transcribe1(): _expansion(1, 2)
 
 def _old_expansion_transcribe():
     """Continuously transcribe newly-acquired creators (both repos), refreshing the creator list from the acquisition ledger."""
@@ -118,13 +109,14 @@ def label_new_transcripts():
         print(f"uploaded {ledger}: +{len(part)} (total {len(old) + len(part)})", flush=True)
     srv.kill(); print("LABEL_BATCH_DONE", flush=True)
 
-WORKERS = ["audios3_shard0", "audios3_shard1", "audios3_shard2", "audios3_shard3", "expansion_transcribe", "expansion_transcribe1", "label_new_transcripts"]
+N_A3, N_EXP = 8, 4
 
 @app.function(image=modal.Image.debian_slim(python_version="3.11"), schedule=modal.Period(hours=24), timeout=600)
 def dispatcher():
     """The only scheduled function (plan limit): re-spawns every worker daily; workers self-limit to 23 h and resume from the Hub."""
-    for name in WORKERS:
-        fc = modal.Function.from_name("t2a", name).spawn(); print("spawned", name, fc.object_id, flush=True)
+    for i in range(N_A3): print("spawned audios3_shard", i, modal.Function.from_name("t2a", "audios3_shard").spawn(i, N_A3).object_id, flush=True)
+    for i in range(N_EXP): print("spawned expansion_shard", i, modal.Function.from_name("t2a", "expansion_shard").spawn(i, N_EXP).object_id, flush=True)
+    print("spawned label_new_transcripts", modal.Function.from_name("t2a", "label_new_transcripts").spawn().object_id, flush=True)
 
 @app.local_entrypoint()
 def main():
