@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Label aoxo/audios2 non-speech gaps with CLAP into CLAP-training format.
+"""Label aoxo/t2a-mommy non-speech gaps with CLAP into CLAP-training format.
 
 Target formats (both written):
 
@@ -35,7 +35,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = "aoxo/audios2"
+REPO = "aoxo/t2a-mommy"
 OUT_REPO = "aoxo/audios2-clap"  # labeled clips + metadata for CLAP fine-tune
 CLAP_ID = "laion/clap-htsat-fused"
 CLAP_SR = 48_000

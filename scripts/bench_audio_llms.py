@@ -45,7 +45,7 @@ def stage_cut(a):
         local = None; out = []
         try:
             for i in range(4):
-                try: local = hf_hub_download("aoxo/audios2", src, repo_type="dataset", local_dir=str(a.work / "tmp" / str(abs(hash(src)) % 32))); break
+                try: local = hf_hub_download("aoxo/t2a-mommy", src, repo_type="dataset", local_dir=str(a.work / "tmp" / str(abs(hash(src)) % 32))); break
                 except Exception:
                     if i == 3: raise
                     time.sleep(5 * 2 ** i)

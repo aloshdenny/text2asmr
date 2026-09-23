@@ -2,11 +2,11 @@
 
 Text → ASMR audio generation, built as three layers:
 
-1. **Data**: two large, public, creator-attributed ASMR corpora (`aoxo/audios2`, female voice; `aoxo/audios3`, male voice), word-aligned transcripts, and a non-speech "trigger" label layer on every gap between words.
+1. **Data**: two large, public, creator-attributed ASMR corpora (`aoxo/t2a-mommy`, female voice; `aoxo/t2a-daddy`, male voice), word-aligned transcripts, and a non-speech "trigger" label layer on every gap between words.
 2. **Ontology model (CLAP)**: a fine-tuned audio–text embedding model that can hear what the transcript cannot say (whispering vs. normal speech, kissing, mouth sounds, breathing, moaning, tapping, …). It is the supervision signal for the generator and the tool that lets us label millions of clips cheaply.
 3. **Generator (T2A)**: text (with bracket-tag triggers) → speech + trigger audio → mixed ASMR clip.
 
-Status (2026-09-22): the data and ontology layers are the active work. Transcription of both corpora is at 80–86% and finishing tonight; Qwen3-Omni labeling of the gaps runs nightly; CLAP v6 (trained on the fully-labeled, balanced corpus) is the next run. The generator v1 (Chatterbox + Stable Audio Open LoRAs, plus a from-scratch native model) exists as a baseline and will be retrained once the ontology is trustworthy.
+Status (2026-09-23): **transcription of both corpora is complete** (63,021 + 54,838 files). Qwen3-Omni labeling of the expansion gap clips is the remaining data step; CLAP v6 (trained on the fully-labeled, balanced corpus) is the next run. The generator v1 (Chatterbox + Stable Audio Open LoRAs, plus a from-scratch native model) exists as a baseline and will be retrained once the ontology is trustworthy.
 
 ---
 
@@ -53,7 +53,7 @@ Base model everywhere: `laion/clap-htsat-unfused` (HTS-AT audio tower + RoBERTa 
 | **v3** `train_clap_v3.py` | 8.6k Gemini-Pro audio-only labels; 3 targets (kissing / mouth sounds / breathing) | Multi-positive contrastive **+ background negatives** (reject/whispering windows are only ever negatives) **+ joint 4-way linear head** (`head.pt`, targets + background) for calibrated abstention; SpecAugment-style gain / freq / time masking | Held-out: 4-way acc 0.90, background rejection 0.93, kissing recall 0.92, mouth 0.66, breathing 0.64–0.72. Self-training over a 296k pool added only 3.5k confident positives — mouth/breathing were data-starved (223 / 86 train clips). |
 | **v4** `clapv4.sh`, `prep_yt_chapters.py` | v3 data + YouTube ASMR videos with creator-written chapters (146 videos, `aoxo/asmr-yt-chapters`), windowed and Silero-VAD speech-gated | Chapter title → weak label for every 10 s window in the chapter | Adds the physical-trigger classes the soundgasm corpus lacks, but chapter labels are noisy at window level (a "tapping" chapter has silence, talking, and tapping). Motivated v5. |
 | **v5** `train_clap_v5.py` | Same as v4 | **Multiple-instance learning**: a YouTube chapter is a *bag* of windows; the top-k mean of window scores must match the chapter label. Pro clips are single-window bags; whisper/talk chapters and Pro rejects are background bags (mean-pooled). Contrastive loss kept at 0.5 weight. | Chapter-level accuracy on held-out videos + window-level on Pro held-out; MIL stops the model being punished for the quiet windows inside a chapter. |
-| **v6** (next) | Full Qwen3-Omni labels on audios2 + audios3 + ~600 GB expansion (3.15M+ clips, ~6k creators), + Pro set as held-out | Same v3/v5 objectives, plus the imbalance fixes in §4 | Target: match Pro accuracy per class on held-out creators, per gender. |
+| **v6** (next) | Full Qwen3-Omni labels on t2a-mommy + t2a-daddy + ~600 GB expansion (3.15M+ clips, ~6k creators), + Pro set as held-out | Same v3/v5 objectives, plus the imbalance fixes in §4 | Target: match Pro accuracy per class on held-out creators, per gender. |
 
 Checkpoints: `aoxo/clap-htsat-unfused-asmr-v2` (`v3/{teacher,student_agree,student_all}`, `v4/`, `v5/`, each with `head.pt`). The processor must remain `laion/clap-htsat-unfused`; the *fused* CLAP variant crashes in training (BatchNorm) and is never used.
 
@@ -78,7 +78,7 @@ Two independent fixes, because oversampling alone does not add diversity — it 
 ### 4.1 Acquire more of the rare classes (`docs/DATA_BALANCE_PIPELINE.md`)
 
 A closed loop: `inventory → per-label deficit → discover new creators → acquire → transcribe → cut gaps → label → inventory`.
-- Discovery hits the soundgasm search API with tag queries per deficit label (kissing, moaning, mouth sounds, breathing, plus generic sweeps), **excludes every creator already in the corpora** (3,746), routes each post by its voice tag (`F4*` → audios2, `M4*` → audios3) so gender dimorphism is preserved, and caps files per creator so the expansion adds breadth (new voices) rather than depth.
+- Discovery hits the soundgasm search API with tag queries per deficit label (kissing, moaning, mouth sounds, breathing, plus generic sweeps), **excludes every creator already in the corpora** (3,746), routes each post by its voice tag (`F4*` → t2a-mommy, `M4*` → t2a-daddy) so gender dimorphism is preserved, and caps files per creator so the expansion adds breadth (new voices) rather than depth.
 - Two rounds so far: 5,100 new creators, ~594 GB streamed straight to the Hub from a 1-vCPU droplet (download → commit in batches of 12 → delete).
 - Measured, not assumed: tag-targeting lifts kissing/moaning yield only ~1.2–1.5× over a random creator, so the original "bring every class to half of whispering" target is not reachable from this source; the realistic target is ≥100k clips per vocal class with whispering capped, and physical triggers from YouTube.
 
@@ -105,13 +105,13 @@ Bracket-tag script → audio. The grammar (`text2asmr/compose/grammar.py`) parse
 | Native | **BERT → FiLM U-Net → DDPM** (`text2asmr/native/`), the paper's own architecture from scratch | `scripts/train_native.py`, built with checkpoint/resume from the start. | Trained as a baseline to compare against fine-tuned pretrained backbones on the same corpus. |
 | Renderer | `scripts/compose_asmr.py` | Walks the parsed script, generates each segment with the model that owns it (two conda envs, handing off through per-segment `.npy`), resamples to one rate and crossfades. | Working end-to-end for v1 models. |
 
-Generator v2 plan: retrain Chatterbox T3 on the fully transcribed audios2/audios3 (whisper-vs-speech labels become a conditioning tag), retrain the trigger model on CLAP-v6-verified clips, add CLAP-v6 as a reward/consistency scorer (does the generated window score as the tag it was asked for?), and treat the long-context problem (smooth minutes-long output) with prefill/completion windows over the token sequence.
+Generator v2 plan: retrain Chatterbox T3 on the fully transcribed t2a-mommy/t2a-daddy (whisper-vs-speech labels become a conditioning tag), retrain the trigger model on CLAP-v6-verified clips, add CLAP-v6 as a reward/consistency scorer (does the generated window score as the tag it was asked for?), and treat the long-context problem (smooth minutes-long output) with prefill/completion windows over the token sequence.
 
 ---
 
 ## 6. Data pipeline and infrastructure
 
-- **Corpora**: `aoxo/audios2` (63k files) and `aoxo/audios3` (55k files), 48 kHz AAC, one `<creator>/` prefix per uploader, word-level alignment JSON beside each file. All repos are public.
+- **Corpora**: `aoxo/t2a-mommy` (63k files) and `aoxo/t2a-daddy` (55k files), 48 kHz AAC, one `<creator>/` prefix per uploader, word-level alignment JSON beside each file. All repos are public.
 - **Transcription** (`scripts/transcribe_audios2.py`): faster-whisper large-v3 fp16, batched inference pipeline, Silero-VAD **speech gate** (skip files with <5% speech or <20 s of speech — no GPU time on near-silent files), Hub-resumable (`<file>.json` present ⇒ done), sharded across machines by `crc32(path) % n`, commits every ≤30 min.
 - **Gap cutting** (`scripts/candidates_from_transcripts.py`): every silence span between words becomes a candidate clip (1 s pre-roll, ≤8 s), clips ≥ noise floor only.
 - **Labeling** (`scripts/label_audios2_qwen3.py`): bounded sliding-window prep (int16 decode, per-clip 16 kHz wav) → vLLM `Qwen3-Omni-30B-A3B-Instruct` with an audio-only prompt → incremental ledgers in `aoxo/clap-ft-data` (`v2/*_qwen3omni_labels.jsonl`).
@@ -122,11 +122,15 @@ Key artifacts on the Hub:
 
 | repo | contents |
 |---|---|
-| `aoxo/audios2`, `aoxo/audios3` | raw audio + alignments (female / male) |
-| `aoxo/clap-ft-data` | Pro pilot labels, Qwen3-Omni ledgers, gate index, acquisition snapshot |
+| `aoxo/t2a-mommy` | female-voice corpus: audio, alignments, and its own `labels/` (Qwen3-Omni ledgers, gate index, Gemini-Pro ground truth, legacy ledgers) |
+| `aoxo/t2a-daddy` | male-voice corpus: audio, alignments, `labels/qwen3omni.jsonl` |
+| `aoxo/t2a-audios-v1` | the original v1 corpus + derived speech/trigger segments |
+| `aoxo/clap-ft-data` | cross-corpus training artifacts only: manifests, labeler benchmark, YouTube chapter index, acquisition snapshot |
 | `aoxo/asmr-yt-chapters` | 146 chaptered YouTube ASMR videos for physical triggers |
 | `aoxo/clap-htsat-unfused-asmr-v2` | CLAP v3/v4/v5 checkpoints + heads |
 | `aoxo/text2asmr-chatterbox`, `aoxo/text2asmr-stable-audio` | generator v1 adapters |
+
+Repos were renamed on 2026-09-23 (`audios`→`t2a-audios-v1`, `audios2`→`t2a-mommy`, `audios3`→`t2a-daddy`); each corpus now carries its own label ledgers under `labels/`. The superseded `audios2-clap`, `clap-htsat-unfused-asmr` (v1) and the empty `text2asmr` model repo were deleted.
 
 ---
 

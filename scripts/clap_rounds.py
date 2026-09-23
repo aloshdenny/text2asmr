@@ -47,7 +47,7 @@ def ensure_mel(a, ledger, gm):
                 if not fp.exists():
                     if local is None:
                         for i in range(5):
-                            try: local = hf_hub_download("aoxo/audios2", src, repo_type="dataset", token=os.environ["HF_TOKEN"], local_dir=f"/workspace/tmp_src/{abs(hash(src)) % 64}"); break
+                            try: local = hf_hub_download("aoxo/t2a-mommy", src, repo_type="dataset", token=os.environ["HF_TOKEN"], local_dir=f"/workspace/tmp_src/{abs(hash(src)) % 64}"); break
                             except Exception:
                                 if i == 4: raise
                                 time.sleep(5 * 2 ** i)

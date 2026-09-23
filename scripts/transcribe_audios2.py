@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcribe aoxo/audios2 into word-level alignments, for training v2.
+"""Transcribe aoxo/t2a-mommy into word-level alignments, for training v2.
 
 Three concurrent stages, each bottlenecked on a different resource, so none
 of them sit idle waiting on the others:
@@ -19,7 +19,7 @@ separate instances is the correct way to parallelize, not a workaround) and
 --producer-workers/--uploader-workers add threads on the network-bound
 stages so they can keep that many transcribers fed.
 
-Alignment JSON matches aoxo/audios's own schema (a flat list of
+Alignment JSON matches aoxo/t2a-audios-v1's own schema (a flat list of
 {"type": "word"|"silence", "start", "end", ...}), the same shape segment.py
 already parses -- so this output slots directly into the existing
 speech/trigger extraction pipeline, no new consumer needed.
@@ -45,7 +45,7 @@ import threading
 import time
 from pathlib import Path
 
-REPO_ID = "aoxo/audios2"
+REPO_ID = "aoxo/t2a-mommy"
 BASE = Path(os.environ.get("TRANSCRIBE_BASE", str(Path.home() / "t2a")))
 STAGE_DIR = BASE / "transcribe_stage"
 LOG_FILE = BASE / "transcribe_audios2.log"
@@ -340,7 +340,7 @@ def main() -> int:
     global REPO_ID, STAGE_DIR, LOG_FILE
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=REPO_ID,
-                    help="HF dataset repo to transcribe (default aoxo/audios2)")
+                    help="HF dataset repo to transcribe (default aoxo/t2a-mommy)")
     ap.add_argument("--model", default="medium",
                     help="faster-whisper model size; medium fits ~1-2GB VRAM, "
                         "large-v3 wants a real GPU (~3GB+ per instance)")

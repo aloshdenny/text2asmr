@@ -91,7 +91,7 @@ def main():
             if a.reuse_cuts and all(f.exists() for f in fps.values()): local = None
             else:
               for i in range(5):
-                try: local = hf_hub_download("aoxo/audios2", src, repo_type="dataset", token=hf, local_dir=f"/workspace/tmp_src/{threading.get_ident()%97}"); break
+                try: local = hf_hub_download("aoxo/t2a-mommy", src, repo_type="dataset", token=hf, local_dir=f"/workspace/tmp_src/{threading.get_ident()%97}"); break
                 except Exception:
                     if i == 4: raise
                     time.sleep(5 * 2 ** i)

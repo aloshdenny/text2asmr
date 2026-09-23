@@ -1,6 +1,6 @@
 """Turn word-level alignments into speech and trigger segments.
 
-``aoxo/audios`` pairs each ``N.m4a`` with an ``N.json`` holding a flat list of
+``aoxo/t2a-audios-v1`` pairs each ``N.m4a`` with an ``N.json`` holding a flat list of
 ``{"type": "word"|"silence", "start", "end", ...}`` entries.  That alignment is
 the whole basis of the split:
 

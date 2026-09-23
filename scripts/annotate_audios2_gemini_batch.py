@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vertex Batch API labeling for aoxo/audios2 non-speech gaps.
+"""Vertex Batch API labeling for aoxo/t2a-mommy non-speech gaps.
 
 Vertex does not accept inline Batch requests — clips go to GCS, then
 batchPredictionJobs (~50% vs unary). Model fallback: 3.8-flash → 3.7 → 3.6.

@@ -7,7 +7,7 @@ guesses on clips that DID clear its margin aren't verified either. This runs
 every one of the corpus's 20,332 trigger clips (25.00 hours total) through
 Gemini instead, as a full second opinion rather than a spot-check.
 
-Each clip's source field points back to aoxo/audios (the pre-transcribed
+Each clip's source field points back to aoxo/t2a-audios-v1 (the pre-transcribed
 corpus these clips were originally cut from), which already carries
 word-level transcripts from an earlier transcription pass -- so each request
 includes the 2 words immediately before and after the clip's time window as
@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from text2asmr.data.ontology import TRIGGERS
 
 REPO_SEGMENTS = "aoxo/text2asmr-segments"
-REPO_SOURCE = "aoxo/audios"  # pre-transcribed source corpus these clips were cut from
+REPO_SOURCE = "aoxo/t2a-audios-v1"  # pre-transcribed source corpus these clips were cut from
 
 HERE = Path(__file__).resolve().parents[1]
 OUT_FILE = HERE / "label_tool" / "gemini_retag.jsonl"

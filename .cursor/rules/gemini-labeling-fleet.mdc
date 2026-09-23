@@ -1,0 +1,46 @@
+---
+description: Gemini gap-labeling fleet, GCP/HF/Vertex access (no secret values)
+alwaysApply: true
+---
+
+# Gemini labeling fleet (handoff from chat 0917c4ea)
+
+Source chat: [Gemini labeling pods](0917c4ea-baaa-43c9-b02b-ef6bc5a2e2a7). Do not print or commit tokens.
+
+## What it is
+
+Label `trigger_candidate` gaps (1.5–12s, RMS ≥ −50 dB) from Hub dataset **`aoxo/audios2`** with **Vertex Gemini Batch**. Keep rows stay local jsonl; CLAP train manifest is **`aoxo/clap-ft-data`** (`clap_finetune_manifest.jsonl`). Audio is ephemeral (delete m4a after cuts).
+
+Repo: `/Users/aoxo/vscode/text2asmr`
+- Submit/harvest: `scripts/annotate_audios2_gemini_batch.py` (`--stripe-models` round-robins 3.8/3.7/3.6)
+- Hub download + CLAP rows: `scripts/annotate_audios2_gemini.py` (rotates `HF_TOKEN` / `HF_TOKEN_B`)
+- Manifest: `scripts/build_clap_finetune_manifest.py` + `scripts/sync_clap_ft_manifest.sh`
+- Ledgers: `label_tool/gemini_audios2*.jsonl`, `label_tool/clap_train_audios2*.jsonl`
+
+Vertex: project `project-9da5a2fe-3df4-485e-9a9`, location `global`. GCS `gs://aleddo-splitter-eval/t2a-gemini-batch/`. Batch has **no RPM**; capacity is a **shared pool per model id**. Extra IPs/ports do not multiply quota. Unary RPM is a different product.
+
+Live as of 2026-09-14 ~09:55 IST: GCE **`t2a-label`** `n2-highcpu-32` `us-east1-b` IP `35.185.77.101`, stripe 3.8/3.7/3.6, batch 200, 64 workers, inflight 120. ~**1.34M** unique labeled (~20k/h). ~2.75M gaps total. Billed ~$1/hr until **deleted**. RunPod CPUs terminated. DO `root@139.59.33.163` idle (was duplicate full-corpus). Mac poll-only only.
+
+## Creds (paths only)
+
+| What | Where |
+|---|---|
+| HF write token (aoxo) | `~/.t2a_env` → `HF_TOKEN` (`export KEY=`) |
+| Second Hub token | `~/.t2a_runpod_env` → `HF_TOKEN_B` (mode 600) |
+| RunPod API | `~/.t2a_runpod_env` → `RUNPOD_API_KEY` |
+| Vertex / GCS | `~/.config/gcloud/application_default_credentials.json` + `gcloud` project above |
+| GCE SSH | `gcloud compute ssh t2a-label --zone=us-east1-b --project=project-9da5a2fe-3df4-485e-9a9` |
+| Tinkerspace HF for transcribe | `tinkerspace@100.102.149.78` `~/.t2a_env` and `/home/tinkerspace/t2a/.hf_transcribe.env` (systemd). Default HF cache on that box is another user (PR-only) — always inject aoxo token. |
+
+Hub: 1000 API / 5 min per token. `create_repo` on every sync loop causes 429 — upload_file only.
+
+## Links
+
+- GCE VMs: https://console.cloud.google.com/compute/instances?project=project-9da5a2fe-3df4-485e-9a9
+- Vertex AI: https://console.cloud.google.com/vertex-ai?project=project-9da5a2fe-3df4-485e-9a9
+- GCS batch: https://console.cloud.google.com/storage/browser/aleddo-splitter-eval/t2a-gemini-batch?project=project-9da5a2fe-3df4-485e-9a9
+- Dataset: https://huggingface.co/datasets/aoxo/audios2
+- CLAP labels: https://huggingface.co/datasets/aoxo/clap-ft-data
+- GCP ADC: https://cloud.google.com/docs/authentication/application-default-credentials
+
+Spend: terminate billed GCE/RunPod when the annotator is dead. `stop` is not enough.

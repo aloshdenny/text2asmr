@@ -6,7 +6,7 @@ future-us will otherwise re-derive them the hard way.
 
 ## Corpora
 
-| | `aoxo/text2asmr-uncensored` | `aoxo/audios` |
+| | `aoxo/text2asmr-uncensored` | `aoxo/t2a-audios-v1` |
 |---|---|---|
 | Role | **eval / baseline only** | **primary training corpus** |
 | Audio | 22.05 kHz mono WAV | 48 kHz, stereo (some mono) AAC |
@@ -15,7 +15,7 @@ future-us will otherwise re-derive them the hard way.
 | Files | `wavs.zip` 5.8 GB | 4901 `.m4a`, 1690 `.json` |
 | Gating | gated (auto) | public, apache-2.0 |
 
-`aoxo/audios` is the pre-downgrade source audio for the same project. All 1690
+`aoxo/t2a-audios-v1` is the pre-downgrade source audio for the same project. All 1690
 JSON files have a matching m4a; no JSON is orphaned.
 
 ## Findings against the paper
@@ -53,7 +53,7 @@ characteristic ASR looping on whispered speech, which is close to worst-case
 for acoustic models.
 
 **Decision:** do not use `text2asmr-uncensored` text for training. The
-`aoxo/audios` word-level alignments are cleaner and carry timing.
+`aoxo/t2a-audios-v1` word-level alignments are cleaner and carry timing.
 
 ### 4. The corpus is broader than the paper states
 
@@ -68,11 +68,11 @@ audio is 22.05 kHz mono (the paper's own step 2 confirms the conversion).
 Binaural imaging and the 11-22 kHz band cannot be recovered by upsampling, and
 ASMR depends on both.
 
-`aoxo/audios` retains 48 kHz stereo, which is why it became the primary corpus.
+`aoxo/t2a-audios-v1` retains 48 kHz stereo, which is why it became the primary corpus.
 
 ## Trigger recovery
 
-Since no trigger annotations exist, they are derived from `aoxo/audios`:
+Since no trigger annotations exist, they are derived from `aoxo/t2a-audios-v1`:
 
 1. **Segment by alignment.** Word spans are speech; `silence` spans are
    candidate non-speech. No VAD needed -- the boundaries are given.
@@ -94,6 +94,6 @@ well for others. It is the only cue available from audio alone.
 
 ## Local constraints
 
-Prep runs on an M4 / 16 GB / ~66 GB free. The full `aoxo/audios` corpus is
+Prep runs on an M4 / 16 GB / ~66 GB free. The full `aoxo/t2a-audios-v1` corpus is
 58.4 GiB, so only the 20.5 GiB paired subset is fetched, and segments are
 written out as the source files are decoded rather than after.

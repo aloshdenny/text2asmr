@@ -7,7 +7,7 @@ app = modal.App("t2a")
 HF = modal.Secret.from_name("t2a-hf")
 CACHE = modal.Volume.from_name("t2a-cache", create_if_missing=True)
 REPO_DIR = Path(__file__).parent
-ENV = {"HF_HUB_DISABLE_XET": "1", "PYTHONUNBUFFERED": "1", "PYTHONPATH": "/root/t2a", "HF_HOME": "/cache/hf", "T2A_WHISPER_BATCH": "16", "T2A_TW": "2"}
+ENV = {"HF_HUB_DISABLE_XET": "1", "PYTHONUNBUFFERED": "1", "PYTHONPATH": "/root/t2a", "HF_HOME": "/cache/hf", "T2A_WHISPER_BATCH": "32", "T2A_TW": "3"}
 
 transcribe_image = (modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg")
     .pip_install("faster-whisper", "huggingface_hub>=0.25", "numpy<2", "nvidia-cudnn-cu12", "nvidia-cublas-cu12")
@@ -22,6 +22,15 @@ label_image = (modal.Image.from_registry("nvidia/cuda:12.9.1-devel-ubuntu22.04",
     .add_local_dir(str(REPO_DIR / "scripts"), remote_path="/root/t2a/scripts")
     .add_local_dir(str(REPO_DIR / "text2asmr"), remote_path="/root/t2a/text2asmr"))
 
+
+# repo ids after the 2026-09-23 rename; acquisition ledgers written before it carry the old ids
+MOMMY, DADDY = "aoxo/t2a-mommy", "aoxo/t2a-daddy"
+OLD = {MOMMY: ("audios2", "t2a-mommy"), DADDY: ("audios3", "t2a-daddy")}
+# each corpus repo carries its own label ledgers under labels/
+LEDGER, LEDGER_EXP = "labels/qwen3omni.jsonl", "labels/qwen3omni_expansion.jsonl"
+def _creators(rows, repo):
+    return [r["uploader"] for r in rows if r["repo"].rsplit("/", 1)[-1] in OLD[repo] and r["files"] > 0]
+
 def _ld():
     import nvidia.cublas.lib, nvidia.cudnn.lib
     return list(nvidia.cublas.lib.__path__)[0] + ":" + list(nvidia.cudnn.lib.__path__)[0]
@@ -29,26 +38,27 @@ def _ld():
 def _transcribe(repo, extra, budget_s=23 * 3600 - 900):
     env = {**os.environ, "LD_LIBRARY_PATH": _ld() + ":" + os.environ.get("LD_LIBRARY_PATH", "")}; t0 = time.time()
     while time.time() - t0 < budget_s:
-        rc = subprocess.run(["python", "/root/t2a/scripts/transcribe_audios2.py", "--repo", repo, "--model", "large-v3", "--compute-type", "float16", "--transcribe-workers", os.environ.get("T2A_TW", "2"), "--producer-workers", "4",
+        rc = subprocess.run(["python", "/root/t2a/scripts/transcribe_audios2.py", "--repo", repo, "--model", "large-v3", "--compute-type", "float16", "--transcribe-workers", os.environ.get("T2A_TW", "3"), "--producer-workers", "4",
                              "--upload-batch-size", "64", "--upload-batch-timeout", "1500", *extra], cwd="/root/t2a", env=env).returncode
         print(f"transcribe {repo} {extra} exited rc={rc}; ", "done" if rc == 0 else "retrying in 60s", flush=True)
         if rc == 0: return
         time.sleep(60)
 
-TR = dict(image=transcribe_image, gpu="L4", cpu=8, memory=32768, timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE})
+# workspace cap is 10 concurrent containers (2 used by other apps): 7 transcription shards + 1 label batch, so use bigger GPUs per shard
+TR = dict(image=transcribe_image, gpu="L40S", cpu=12, memory=49152, timeout=23 * 3600, secrets=[HF], volumes={"/cache": CACHE})
 @app.function(**TR)
-def audios3_shard(idx: int = 0, n: int = 8): _transcribe("aoxo/audios3", ["--num-shards", str(n), "--shard-index", str(idx)])
+def audios3_shard(idx: int = 0, n: int = 4): _transcribe("aoxo/t2a-daddy", ["--num-shards", str(n), "--shard-index", str(idx)])
 
 @app.function(**TR)
-def expansion_shard(idx: int = 0, n: int = 4):
+def expansion_shard(idx: int = 0, n: int = 3):
     from huggingface_hub import hf_hub_download
     t0 = time.time()
     while time.time() - t0 < 23 * 3600 - 1800:
         rows = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", "v2/acquired_snapshot.jsonl", repo_type="dataset", force_download=True))]
-        for repo in ("audios2", "audios3"):
-            cs = [r["uploader"] for r in rows if r["repo"].endswith(repo) and r["files"] > 0]
-            Path(f"/tmp/creators_{repo}.txt").write_text("\n".join(cs) + "\n"); print(f"{repo}: {len(cs)} expansion creators (shard {idx}/{n})", flush=True)
-            if cs: _transcribe(f"aoxo/{repo}", ["--creators-file", f"/tmp/creators_{repo}.txt", "--num-shards", str(n), "--shard-index", str(idx)], budget_s=6 * 3600)
+        for repo in (MOMMY, DADDY):
+            cs = _creators(rows, repo); tag = repo.split("/")[-1]
+            Path(f"/tmp/creators_{tag}.txt").write_text("\n".join(cs) + "\n"); print(f"{tag}: {len(cs)} expansion creators (shard {idx}/{n})", flush=True)
+            if cs: _transcribe(repo, ["--creators-file", f"/tmp/creators_{tag}.txt", "--num-shards", str(n), "--shard-index", str(idx)], budget_s=6 * 3600)
         print("expansion pass done; sleeping 10 min", flush=True); time.sleep(600)
 
 def _old_expansion_transcribe():
@@ -65,23 +75,23 @@ def _old_expansion_transcribe():
 
 @app.function(image=label_image, gpu="A100-80GB", cpu=12, memory=65536, timeout=8 * 3600, secrets=[HF], volumes={"/cache": CACHE})
 def label_new_transcripts():
-    """Daily: gap clips from transcripts not yet labeled (expansion creators in both repos + audios3) -> Qwen3-Omni via vLLM -> HF ledgers."""
+    """Daily: gap clips from transcripts not yet labeled (expansion creators in both repos + all of t2a-daddy) -> Qwen3-Omni via vLLM -> HF ledgers."""
     from huggingface_hub import HfApi, hf_hub_download
     api = HfApi(); work = Path("/tmp/lab"); work.mkdir(parents=True, exist_ok=True)
     srv = subprocess.Popen(["vllm", "serve", "Qwen/Qwen3-Omni-30B-A3B-Instruct", "--dtype", "bfloat16", "--max-model-len", "4096", "--limit-mm-per-prompt", '{"audio":1}', "--gpu-memory-utilization", "0.85", "--port", "8000"], stdout=open("/tmp/vllm.log", "w"), stderr=subprocess.STDOUT)
     labeled = set()
-    for ledger in ("v2/audios2_qwen3omni_labels.jsonl", "v2/audios3_qwen3omni_labels.jsonl", "v2/expansion_qwen3omni_labels.jsonl"):
+    for repo, ledger in ((MOMMY, LEDGER), (MOMMY, LEDGER_EXP), (DADDY, LEDGER)):
         try:
-            for l in open(hf_hub_download("aoxo/clap-ft-data", ledger, repo_type="dataset", force_download=True)): labeled.add(json.loads(l)["uid"])
+            for l in open(hf_hub_download(repo, ledger, repo_type="dataset", force_download=True)): labeled.add(json.loads(l)["uid"])
         except Exception: pass
     print("already labeled uids:", len(labeled), flush=True)
-    # candidate files: any transcribed (.json) source in audios3, or in audios2 belonging to an expansion creator
+    # candidate files: any transcribed (.json) source in t2a-daddy, or in t2a-mommy belonging to an expansion creator
     acq = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", "v2/acquired_snapshot.jsonl", repo_type="dataset", force_download=True))]
-    exp2 = {r["uploader"] for r in acq if r["repo"].endswith("audios2")}
+    exp2 = set(_creators(acq, MOMMY))
     files = {}
-    for repo in ("aoxo/audios2", "aoxo/audios3"):
+    for repo in (MOMMY, DADDY):
         fs = api.list_repo_files(repo, repo_type="dataset"); js = {f[:-5] for f in fs if f.endswith(".json")}
-        sel = [f for f in fs if f.endswith(".m4a") and f in js and (repo.endswith("audios3") or f.split("/")[0] in exp2)]
+        sel = [f for f in fs if f.endswith(".m4a") and f in js and (repo == DADDY or f.split("/")[0] in exp2)]
         files[repo] = sel; print(repo, "transcribed candidate files:", len(sel), flush=True)
     cand = work / "candidates.jsonl"; cand.unlink(missing_ok=True)
     for repo, sel in files.items():
@@ -98,18 +108,18 @@ def label_new_transcripts():
     subprocess.run(["python", "/root/t2a/scripts/label_audios2_qwen3.py", "--stage", "label", "--work", str(work), "--concurrency", "48", "--delete-wav", "--no-clap"], cwd="/root/t2a", check=True)
     # merge into per-repo ledgers on the Hub (append semantics via download+concat)
     new = [json.loads(l) for l in open(work / "labels.jsonl")]; idx = {json.loads(l)["uid"]: json.loads(l) for l in open(work / "clap_index.jsonl")}
-    for repo_key, ledger in (("audios3", "v2/audios3_qwen3omni_labels.jsonl"), ("audios2", "v2/expansion_qwen3omni_labels.jsonl")):
-        part = [dict(r, source=idx[r["uid"]]["source"], repo=idx[r["uid"]]["repo"]) for r in new if r["uid"] in idx and idx[r["uid"]]["repo"].endswith(repo_key)]
+    for repo_key, ledger in ((DADDY, LEDGER), (MOMMY, LEDGER_EXP)):
+        part = [dict(r, source=idx[r["uid"]]["source"], repo=idx[r["uid"]]["repo"]) for r in new if r["uid"] in idx and idx[r["uid"]]["repo"].rsplit("/", 1)[-1] in OLD[repo_key]]
         if not part: continue
         old = []
-        try: old = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", ledger, repo_type="dataset", force_download=True))]
+        try: old = [json.loads(l) for l in open(hf_hub_download(repo_key, ledger, repo_type="dataset", force_download=True))]
         except Exception: pass
         out = work / ledger.split("/")[-1]; out.write_text("".join(json.dumps(r) + "\n" for r in old + part))
-        api.upload_file(path_or_fileobj=str(out), path_in_repo=ledger, repo_id="aoxo/clap-ft-data", repo_type="dataset", commit_message=f"+{len(part)} Qwen3-Omni labels ({repo_key})")
+        api.upload_file(path_or_fileobj=str(out), path_in_repo=ledger, repo_id=repo_key, repo_type="dataset", commit_message=f"+{len(part)} Qwen3-Omni labels")
         print(f"uploaded {ledger}: +{len(part)} (total {len(old) + len(part)})", flush=True)
     srv.kill(); print("LABEL_BATCH_DONE", flush=True)
 
-N_A3, N_EXP = 8, 4
+N_A3, N_EXP = 4, 3
 
 @app.function(image=modal.Image.debian_slim(python_version="3.11"), schedule=modal.Period(hours=24), timeout=600)
 def dispatcher():

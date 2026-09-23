@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build both training sets from `aoxo/audios`, tagging triggers with CLAP.
+"""Build both training sets from `aoxo/t2a-audios-v1`, tagging triggers with CLAP.
 
 Runs on the GPU box. For each source file it streams the m4a, cuts it using the
 word-level alignment, and writes two streams:
@@ -41,7 +41,7 @@ from text2asmr.data.ontology import (  # noqa: E402
 )
 from text2asmr.data.segment import load_alignment, split_alignment  # noqa: E402
 
-REPO = "aoxo/audios"
+REPO = "aoxo/t2a-audios-v1"
 CLAP = "laion/clap-htsat-fused"
 CLAP_SR = 48_000
 SPEECH_SR = 24_000

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stream sources from aoxo/audios2, cut labeled clips (CPU procs), log-mel on GPU, write fp16 shards.
+"""Stream sources from aoxo/t2a-mommy, cut labeled clips (CPU procs), log-mel on GPU, write fp16 shards.
 
 Output: <out>/shard_XXXX.f16 (raw fp16, N x 1001 x 64) + <out>/index.jsonl (uid,label,text,split,shard,row).
 Resumable per source via <out>/done_sources.txt.  GPU mel replicates ClapFeatureExtractor (htk, repeatpad, dB).
@@ -105,7 +105,7 @@ class ShardWriter:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--subset", required=True); ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--repo", default="aoxo/audios2"); ap.add_argument("--workers", type=int, default=20)
+    ap.add_argument("--repo", default="aoxo/t2a-mommy"); ap.add_argument("--workers", type=int, default=20)
     ap.add_argument("--per-shard", type=int, default=4000); ap.add_argument("--tmp", type=Path, default=Path("/workspace/tmp_src"))
     ap.add_argument("--shm", type=Path, default=Path("/dev/shm/t2a"))
     a = ap.parse_args()

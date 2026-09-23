@@ -9,7 +9,7 @@ import json, random, os
 from huggingface_hub import HfApi, hf_hub_download
 api = HfApi(); acq = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", "v2/acquired_snapshot.jsonl", repo_type="dataset"))]
 rng = random.Random(0)
-for repo in ("aoxo/audios2", "aoxo/audios3"):
+for repo in ("aoxo/t2a-mommy", "aoxo/t2a-daddy"):
     cs = [r["uploader"] for r in acq if r["repo"] == repo and r["files"] >= 20]; rng.shuffle(cs); cs = cs[:3]
     files = [f for f in api.list_repo_files(repo, repo_type="dataset") if f.endswith(".m4a") and f.split("/")[0] in cs]
     rng.shuffle(files); files = files[:120]

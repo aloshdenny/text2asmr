@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stream soundgasm creators from expansion_plan.jsonl into aoxo/audios2 (female) / aoxo/audios3 (male). DO-box friendly:
+"""Stream soundgasm creators from expansion_plan.jsonl into aoxo/t2a-mommy (female) / aoxo/t2a-daddy (male). DO-box friendly:
 one creator at a time, small local footprint, HF commits in batches, resumable via acquired.jsonl. Skips creators already on the Hub."""
 from __future__ import annotations
 import argparse, json, os, shutil, sys, time
@@ -16,7 +16,7 @@ def main():
     if ledger.exists():
         for l in open(ledger): r = json.loads(l); done_creators.add(r["uploader"]); pushed_gb += r["gb"]
     existing = {}
-    for repo in ("aoxo/audios2", "aoxo/audios3"):
+    for repo in ("aoxo/t2a-mommy", "aoxo/t2a-daddy"):
         existing[repo] = {f.split("/")[0].lower() for f in api.list_repo_files(repo, repo_type="dataset") if "/" in f}
     plan = [json.loads(l) for l in open(a.plan)]
     if a.only_repo: plan = [p for p in plan if p["repo"] == a.only_repo]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mine trigger-sound candidates from transcripts, incrementally.
 
-transcribe_audios2.py is still working through aoxo/audios2 (thousands of
+transcribe_audios2.py is still working through aoxo/t2a-mommy (thousands of
 files remain), so this can't assume the corpus is fully transcribed -- it has
 to be safe to run today against whatever's transcribed so far, and safe to
 run again next week against whatever's transcribed by then, without redoing
@@ -46,7 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-REPO_ID = "aoxo/audios2"
+REPO_ID = "aoxo/t2a-mommy"
 LABEL_TOOL_DIR = Path(__file__).resolve().parents[1] / "label_tool"
 MINED_FILE = LABEL_TOOL_DIR / "mined_sources.txt"
 CANDIDATES_FILE = LABEL_TOOL_DIR / "candidates.jsonl"

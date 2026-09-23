@@ -6,7 +6,7 @@ import launch_clap_v2_pod as L
 HERE = Path(__file__).resolve().parents[1]
 def main():
     key = os.environ["RUNPOD_API_KEY"]; token = os.environ["HF_TOKEN"]; pub = Path.home().joinpath(".ssh/id_ed25519.pub").read_text().strip()
-    repo = os.environ.get("T2A_REPO", "aoxo/audios3"); shards = os.environ.get("T2A_SHARDS", "2"); idx = os.environ.get("T2A_SHARD", "1"); workers = os.environ.get("T2A_WORKERS", "4")
+    repo = os.environ.get("T2A_REPO", "aoxo/t2a-daddy"); shards = os.environ.get("T2A_SHARDS", "2"); idx = os.environ.get("T2A_SHARD", "1"); workers = os.environ.get("T2A_WORKERS", "4")
     if os.environ.get("REUSE_POD") and Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).exists():
         j = json.loads(Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).read_text()); return kick(j["host"], j["port"], repo, shards, idx, workers)
     pod = None

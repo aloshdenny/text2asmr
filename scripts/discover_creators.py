@@ -20,7 +20,7 @@ def route(cat: str, title: str):
     c = (cat or "").lower(); t = (title or "").upper()
     m = re.search(r"\b([FM])[FM]?4", t) or re.search(r"^([fm])", c)
     if not m: return None
-    return "aoxo/audios2" if m.group(1).upper() == "F" else "aoxo/audios3"
+    return "aoxo/t2a-mommy" if m.group(1).upper() == "F" else "aoxo/t2a-daddy"
 def search(q, pages, sleep=0.6):
     cursor = None
     for _ in range(pages):

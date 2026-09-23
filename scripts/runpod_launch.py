@@ -127,7 +127,7 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str,
     fi
 
     if [ "$STAGE" = "transcribe" ]; then
-      echo "=== transcribing aoxo/audios2 with faster-whisper ==="
+      echo "=== transcribing aoxo/t2a-mommy with faster-whisper ==="
       python -m pip install -q faster-whisper "huggingface_hub[hf_xet]"
       mkdir -p /workspace/t2a
       export TRANSCRIBE_BASE=/workspace/t2a
@@ -145,7 +145,7 @@ def bootstrap_script(stage: str, hf_token_env: str, repo: str,
     fi
 
     if [ "$STAGE" = "build" ] || [ "$STAGE" = "all" ]; then
-      echo "=== rebuilding corpus from aoxo/audios ==="
+      echo "=== rebuilding corpus from aoxo/t2a-audios-v1 ==="
       python -m pip install -q transformers datasets soundfile librosa
       python scripts/build_datasets.py --out /workspace/out \
           --trigger-hours 25 --speech-hours 120

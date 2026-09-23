@@ -1,9 +1,9 @@
 # Data-balance pipeline: Qwen3-Omni labels + targeted 1 TB expansion
 
-Goal: a CLAP model that is good on `audios2`/`audios3`, trained on labels that are (a) learnable from audio and
+Goal: a CLAP model that is good on `t2a-mommy`/`t2a-daddy`, trained on labels that are (a) learnable from audio and
 (b) balanced across the vocal ontology, from (c) many creators. Everything below is measured, not assumed.
 
-## 0. Where we are (audios2, Qwen3-Omni-30B via vLLM, 1.89M gap clips, 443 creators)
+## 0. Where we are (t2a-mommy, Qwen3-Omni-30B via vLLM, 1.89M gap clips, 443 creators)
 
 | label | clips | share | hours | creators | top-creator share |
 |---|---|---|---|---|---|
@@ -22,7 +22,7 @@ A100-80GB: ~65 clips/s (~$8 per 1M clips). Gemini/GCP is out (billing); Claude h
 
 ## 1. Ontology and targets (vocal core + physical tail)
 
-Targets are for the **combined** audios2 + audios3 + expansion set, per label, with a creator cap so no creator exceeds 3% of a label.
+Targets are for the **combined** t2a-mommy + t2a-daddy + expansion set, per label, with a creator cap so no creator exceeds 3% of a label.
 
 | label | target clips | target hours | why |
 |---|---|---|---|
@@ -51,30 +51,30 @@ Output: per-label clips / hours / creators / top-creator share (the table above)
 after applying the 3%-per-creator cap. This is the only input to discovery, so acquisition stops automatically when a label is full.
 
 ### 2.2 Discovery (`scripts/discover_creators.py`, DO box, network only)
-- Source: `ilovesoundgasm.com` search API (`/api/search?q=<tag>&cursor=`), same as the audios3 discovery.
+- Source: `ilovesoundgasm.com` search API (`/api/search?q=<tag>&cursor=`), same as the t2a-daddy discovery.
 - Query sets per deficit label (tags/keywords soundgasm creators actually use):
   - kissing: `kissing`, `kisses`, `mwah`, `smooches`, `kiss sounds`, `cheek kisses`
   - moaning: `moaning`, `moans`, `whimpers`, `heavy moaning`, `orgasm`
   - mouth sounds: `mouth sounds`, `wet sounds`, `licking`, `ear licking`, `lip smacking`, `sloppy`
   - breathing: `heavy breathing`, `breathing`, `panting`
   - (physical labels are *not* sourced from soundgasm; see YouTube route)
-- **Exclusion**: creators already in `aoxo/audios2` or `aoxo/audios3` (creator = first path component). Build once from the Hub file
+- **Exclusion**: creators already in `aoxo/t2a-mommy` or `aoxo/t2a-daddy` (creator = first path component). Build once from the Hub file
   lists into `label_tool/v2/existing_creators.txt`; the discovery script refuses any uploader in it.
 - Ranking: for each new creator, score = (#posts hitting deficit tags) x (deficit weight of those labels); keep creators with >= 8
   matching posts; **cap 40 files / 4 GB per creator** so the expansion adds breadth (new creators) not depth.
-- Gender balance: deficits are computed **per repo** (female/audios2 and male/audios3 separately), so kissing/moaning get filled on both sides; the voice tag decides the destination repo (see 2.3).
+- Gender balance: deficits are computed **per repo** (female/t2a-mommy and male/t2a-daddy separately), so kissing/moaning get filled on both sides; the voice tag decides the destination repo (see 2.3).
 - Output: `expansion_plan.jsonl` (creator, post URLs, predicted label contributions, GB). Stop adding creators when the projected
   contribution covers every deficit or the byte budget is reached.
 
 ### 2.3 Acquire (DO box for downloads; `scripts/acquire_stream.py`)
-- Stream one file at a time: download -> push to **`aoxo/audios2` (female voice) or `aoxo/audios3` (male voice)** -> delete
-  local. The repo is the gender axis and stays that way: route by the post's voice tag (`F4M`/`F4F`/`F4A`/`F4TF` -> audios2;
-  `M4F`/`M4M`/`M4A` -> audios3; multi-voice tags like `FF4M`/`MF4F` -> the leading voice letter; posts with no voice tag are
+- Stream one file at a time: download -> push to **`aoxo/t2a-mommy` (female voice) or `aoxo/t2a-daddy` (male voice)** -> delete
+  local. The repo is the gender axis and stays that way: route by the post's voice tag (`F4M`/`F4F`/`F4A`/`F4TF` -> t2a-mommy;
+  `M4F`/`M4M`/`M4A` -> t2a-daddy; multi-voice tags like `FF4M`/`MF4F` -> the leading voice letter; posts with no voice tag are
   checked against the creator's other posts, and skipped if still ambiguous). Provenance lives in `expansion_manifest.jsonl`
   (creator, file, tags, source query, batch), not in the repo name; new creators land under their own `<creator>/` prefix like
   every existing one, so sharding, transcription resume (`<file>.json` present => done) and labeling work unchanged. The droplet has ~15 GB disk and 1 vCPU, so it must never hold more than a few files; at ~8 MB/s a 1 TB expansion is ~35 h
   of wall-clock. If that is too slow, a RunPod CPU pod (~$0.10/h, 200 GB disk) does it in a few hours.
-- Byte budget: ~1 TB total across audios2+audios3 expansion, allocated in proportion to deficits (kissing/moaning first).
+- Byte budget: ~1 TB total across t2a-mommy + t2a-daddy expansion, allocated in proportion to deficits (kissing/moaning first).
 - Record `expansion_manifest.jsonl` (creator, file, size, tags, source query) so every file traces back to the deficit it serves.
 
 ### 2.4 Transcribe (tinkerspace + RunPod shards, `scripts/transcribe_audios2.py --repo aoxo/audios4`)
@@ -90,22 +90,22 @@ after applying the 3%-per-creator cap. This is the only input to discovery, so a
 - Prompt lists `moaning` and `normal speech` explicitly (the old prompt folded both into "reject", which is why v1-v3 never had them).
 
 ### 2.6 Build the balanced training set (`scripts/build_clap_v2_subset.py` successor)
-- Union of Pro labels (8.6k, highest quality) + Qwen3 labels (audios2 + audios3, including the expansion files).
+- Union of Pro labels (8.6k, highest quality) + Qwen3 labels (t2a-mommy + t2a-daddy, including the expansion files).
 - Per label: cap at target, **3% per-creator cap**, alpha=0.5 tempering for anything still uneven, `normal speech` + `silence` as
   explicit negatives, whispering capped at 300k.
 - Splits by **creator** (not clip, not file): 20% of creators held out. Also keep the Pro held-out set as the fixed yardstick.
 
 ### 2.7 Train + evaluate CLAP v6 (`scripts/train_clap_v3.py` / `v5`, RunPod)
 - Joint contrastive + classification head (bg = silence/speech), augmentation on, early stop on held-out-creator macro recall.
-- Report per-label recall on (a) Pro held-out, (b) held-out creators, (c) audios3-only held-out creators (male voices).
+- Report per-label recall on (a) Pro held-out, (b) held-out creators, (c) t2a-daddy-only held-out creators (male voices).
 - Ship when kissing/moaning/mouth/breathing each exceed ~85% recall at >= 85% precision with abstention.
 
 ## 3. Budget and timeline (rough)
 
 | step | resource | time | cost |
 |---|---|---|---|
-| audios3 transcription (in progress) | tinkerspace + 1x4090 | ~5 days | ~$90 |
-| audios3 gap labeling | 1x A100 | ~10 h | ~$16 |
+| t2a-daddy transcription (done 2026-09-23) | tinkerspace + 1x4090 | ~5 days | ~$90 |
+| t2a-daddy gap labeling | 1x A100 | ~10 h | ~$16 |
 | discovery + 1 TB acquisition | DO box (or CPU pod) | 1-2 days | ~$0-5 |
 | expansion transcription (~60k files) | 4 GPU shards | ~4 days | ~$280 |
 | expansion labeling | 1x A100 | ~15 h | ~$25 |
@@ -115,7 +115,7 @@ The expensive line is transcription. Two ways to cut it: transcribe only the exp
 (discovery already filters for that), and raise the speech gate (skip files with <15% speech) since we only need the gaps.
 
 ## 4. Guardrails
-- Never acquire from a creator already in audios2/audios3 (exclusion list is the first check in discovery).
+- Never acquire from a creator already in t2a-mommy/t2a-daddy (exclusion list is the first check in discovery).
 - Never let one creator exceed 3% of any label in the training set.
 - Every acquisition batch re-runs the inventory before the next batch; no label is over-collected.
 - Commit ledgers every <= 30 min; every stage is resumable from the Hub.

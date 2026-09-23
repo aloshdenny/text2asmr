@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch a parallel RunPod fleet for CLAP-labeling aoxo/audios2."""
+"""Launch a parallel RunPod fleet for CLAP-labeling aoxo/t2a-mommy."""
 from __future__ import annotations
 
 import argparse

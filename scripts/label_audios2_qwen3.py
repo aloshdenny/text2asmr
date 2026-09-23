@@ -98,7 +98,7 @@ def stage_prep(a):
         rows = by_src[src]; local = None; out = []
         try:
             for i in range(5):
-                try: local = hf_hub_download(rows[0].get("repo") or "aoxo/audios2", src, repo_type="dataset", local_dir=str(a.work / "tmp" / str(abs(hash(src)) % 64))); break
+                try: local = hf_hub_download(rows[0].get("repo") or "aoxo/t2a-mommy", src, repo_type="dataset", local_dir=str(a.work / "tmp" / str(abs(hash(src)) % 64))); break
                 except Exception:
                     if i == 4: raise
                     time.sleep(5 * 2 ** i)

@@ -35,7 +35,7 @@ run_repo() {
   done
 }
 
-run_repo aoxo/audios2
+run_repo aoxo/t2a-mommy
 echo "AUDIOS2_DONE $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-run_repo aoxo/audios3
+run_repo aoxo/t2a-daddy
 echo "AUDIOS3_DONE $(date -u +%Y-%m-%dT%H:%M:%SZ)"

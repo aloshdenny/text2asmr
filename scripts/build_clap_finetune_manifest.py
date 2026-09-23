@@ -22,7 +22,7 @@ sys.path.insert(0, str(HERE))
 from text2asmr.data.ontology import BY_KEY, intensity_from_loudness  # noqa: E402
 
 SEGMENTS_REPO = "aoxo/text2asmr-segments"
-AUDIOS2_REPO = "aoxo/audios2"
+AUDIOS2_REPO = "aoxo/t2a-mommy"
 
 
 def clap_texts(trigger: str, intensity: str = "soft") -> list[str]:

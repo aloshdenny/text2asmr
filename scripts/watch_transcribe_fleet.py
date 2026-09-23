@@ -38,7 +38,7 @@ import json
 import os
 from huggingface_hub import HfApi
 print(json.dumps(HfApi(token=os.environ["HF_TOKEN"]).list_repo_files(
-    "aoxo/audios2", repo_type="dataset"
+    "aoxo/t2a-mommy", repo_type="dataset"
 )))
 """
     output = subprocess.check_output(

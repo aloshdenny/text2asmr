@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Label aoxo/audios2 non-speech gaps with Gemini into CLAP-training format.
+"""Label aoxo/t2a-mommy non-speech gaps with Gemini into CLAP-training format.
 
 Gemini replaces CLAP as the classifier (reuse / reject / invent ontology policy).
 Output rows match what build_datasets.py + LAION-CLAP fine-tune expect:
@@ -38,7 +38,7 @@ from scripts.retag_triggers_gemini import (  # noqa: E402
 from text2asmr.data.ontology import BY_KEY, intensity_from_loudness  # noqa: E402
 from text2asmr.data.segment import load_alignment, split_alignment  # noqa: E402
 
-REPO = "aoxo/audios2"
+REPO = "aoxo/t2a-mommy"
 HERE = Path(__file__).resolve().parents[1]
 OUT_DIR = HERE / "label_tool"
 OUT_FILE = OUT_DIR / "gemini_audios2.jsonl"  # legacy / merged ledger
