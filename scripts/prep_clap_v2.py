@@ -15,6 +15,15 @@ for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXP
 SR = 48_000; MAX_S = SR * 10; FRAMES = 1001; MELS = 64; N_FFT = 1024; HOP = 480
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
+def decode_url(url, token, start, dur):
+    """Pull just the clip's byte range straight from the Hub - a 30-min source costs ~1 MB, not ~28 MB."""
+    cmd = ["ffmpeg", "-v", "error", "-threads", "1",
+           "-headers", f"Authorization: Bearer {token}\r\n", "-reconnect", "1", "-reconnect_streamed", "1",
+           "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", url,
+           "-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(SR), "-ac", "1", "-"]
+    out = subprocess.run(cmd, capture_output=True, check=True, timeout=300).stdout
+    return np.frombuffer(out, dtype=np.float32).copy()
+
 def decode(path, start, dur):
     cmd = ["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
            "-i", str(path), "-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(SR), "-ac", "1", "-"]
@@ -29,10 +38,25 @@ def repeatpad(w: np.ndarray) -> np.ndarray:
     return w.astype(np.float32)
 
 def process_source(args):
-    src, rows, repo, tmp, shm = args
-    from huggingface_hub import hf_hub_download
+    src, rows, repo, tmp, shm, stream = args
+    from huggingface_hub import hf_hub_download, hf_hub_url
     token = os.environ["HF_TOKEN"]; local = None; wavs, metas, nfail = [], [], 0
     try:
+        if stream:
+            url = hf_hub_url(repo, src, repo_type="dataset")
+            for r in rows:
+                for attempt in range(3):
+                    try:
+                        w = decode_url(url, token, float(r["start"]), float(r["duration"]))
+                        if w.size < SR // 4: break
+                        wavs.append(repeatpad(w)); metas.append({k: r[k] for k in ("uid", "label", "text", "split")}); break
+                    except Exception:
+                        if attempt == 2: nfail += 1
+                        else: time.sleep(2 * (attempt + 1))
+            path = None
+            if wavs:
+                path = shm / f"{os.getpid()}_{abs(hash(src))}.npy"; np.save(path, np.stack(wavs))
+            return src, str(path) if path else None, metas, nfail, None
         for attempt in range(6):
             try:
                 local = hf_hub_download(repo, src, repo_type="dataset", token=token, local_dir=str(tmp / f"p{os.getpid()}")); break
@@ -108,6 +132,7 @@ def main() -> int:
     ap.add_argument("--repo", default="aoxo/t2a-mommy"); ap.add_argument("--workers", type=int, default=20)
     ap.add_argument("--per-shard", type=int, default=4000); ap.add_argument("--tmp", type=Path, default=Path("/workspace/tmp_src"))
     ap.add_argument("--shm", type=Path, default=Path("/dev/shm/t2a"))
+    ap.add_argument("--stream", action="store_true", help="decode clips over HTTP range requests instead of downloading whole sources")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True); a.tmp.mkdir(parents=True, exist_ok=True); a.shm.mkdir(parents=True, exist_ok=True)
     gm = GpuMel(); validate(gm)
@@ -122,7 +147,7 @@ def main() -> int:
     stats = {"src": 0, "clips": 0, "fail": 0}; t0 = time.time()
     import multiprocessing as mp
     with mp.get_context("spawn").Pool(a.workers) as pool:
-        for src, path, metas, nfail, err in pool.imap_unordered(process_source, [(s, by_src[s], a.repo, a.tmp, a.shm) for s in todo], chunksize=1):
+        for src, path, metas, nfail, err in pool.imap_unordered(process_source, [(s, by_src[s], a.repo, a.tmp, a.shm, a.stream) for s in todo], chunksize=1):
             if err: log(f"source fail {src}: {err}")
             if path:
                 wavs = np.load(path); os.remove(path)
