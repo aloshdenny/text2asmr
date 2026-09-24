@@ -36,11 +36,21 @@ CAPTIONS = {
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 
+def ledger_files() -> list[tuple[str, str]]:
+    """Every label ledger on the Hub, including the per-shard files that parallel labeling runs write
+    (labels/qwen3omni_expansion.s0.jsonl etc.) -- missing those silently trains on a subset."""
+    from huggingface_hub import HfApi
+    api = HfApi(); out = []
+    for repo in (MOMMY, DADDY):
+        out += [(repo, f) for f in api.list_repo_files(repo, repo_type="dataset")
+                if f.startswith("labels/qwen3omni") and f.endswith(".jsonl")]
+    return out
+
+
 def load_ledgers(cache: str) -> list[dict]:
     """Every label row we have, as {uid, label, source, creator, repo}."""
     rows = []
-    for repo, name in ((MOMMY, "labels/qwen3omni.jsonl"), (MOMMY, "labels/qwen3omni_expansion.jsonl"),
-                       (DADDY, "labels/qwen3omni.jsonl")):
+    for repo, name in ledger_files():
         try: p = hf_hub_download(repo, name, repo_type="dataset", cache_dir=cache)
         except Exception as e: log(f"missing {repo}:{name} ({type(e).__name__})"); continue
         n = 0
@@ -121,6 +131,12 @@ def main() -> int:
     ap.add_argument("--eval-creator-frac", type=float, default=0.08)
     ap.add_argument("--cache", default=os.environ.get("T2A_CACHE", "hfcache"))
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--eval-creators-file", type=Path, default=None,
+                    help="pin the held-out creators (one 'repo\tcreator' per line) so metrics stay comparable "
+                         "across versions; written on first use, read afterwards")
+    ap.add_argument("--already", type=Path, default=None,
+                    help="an existing mels index.jsonl; its uids are written to <out>/delta_*.jsonl so prep only "
+                         "has to cut what is new")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(a.seed)
@@ -152,10 +168,18 @@ def main() -> int:
             log(f"{label:14} {repo.split('/')[-1]:10} (bg) wanted {want:6} got {len(got):6}")
 
     # creator-split: a creator is either train or eval, never both, per corpus
-    creators = sorted({(r["repo"], r["creator"]) for r in picked}); rng.shuffle(creators)
-    n_eval = int(len(creators) * a.eval_creator_frac)
-    eval_creators = set(creators[:n_eval])
-    log(f"{len(creators)} creators in subset; {len(eval_creators)} held out for eval")
+    creators = sorted({(r["repo"], r["creator"]) for r in picked})
+    if a.eval_creators_file and a.eval_creators_file.exists():
+        eval_creators = {tuple(l.rstrip("\n").split("\t")) for l in a.eval_creators_file.open() if l.strip()}
+        log(f"{len(creators)} creators in subset; {len(eval_creators)} eval creators pinned from {a.eval_creators_file}")
+    else:
+        rng.shuffle(creators)
+        n_eval = int(len(creators) * a.eval_creator_frac)
+        eval_creators = set(creators[:n_eval])
+        log(f"{len(creators)} creators in subset; {len(eval_creators)} held out for eval")
+        if a.eval_creators_file:
+            a.eval_creators_file.write_text("".join(f"{r}\t{c}\n" for r, c in sorted(eval_creators)))
+            log(f"wrote {a.eval_creators_file}")
 
     # geometry
     wanted_mommy = {r["uid"] for r in picked if r["repo"] == MOMMY}
@@ -179,6 +203,19 @@ def main() -> int:
             "creator": r["creator"], "raw_label": r["label"], "repo": r["repo"]}) + "\n")
         stats[split][r["target"]] += 1; written += 1
     for h in handles.values(): h.close()
+
+    if a.already and a.already.exists():
+        have = set()
+        for line in a.already.open():
+            try: have.add(json.loads(line)["uid"])
+            except Exception: pass
+        for corpus in ("mommy", "daddy"):
+            src = a.out / f"subset_{corpus}.jsonl"; dst = a.out / f"delta_{corpus}.jsonl"
+            n = 0
+            with src.open() as fi, dst.open("w") as fo:
+                for line in fi:
+                    if json.loads(line)["uid"] not in have: fo.write(line); n += 1
+            log(f"delta_{corpus}: {n} clips not yet in {a.already}")
     json.dump({k: dict(v) for k, v in stats.items()}, open(a.out / "stats.json", "w"), indent=2)
     log(f"wrote {written} rows -> {a.out}")
     log("train: " + json.dumps(dict(stats["train"])) + "  eval: " + json.dumps(dict(stats["eval"])))

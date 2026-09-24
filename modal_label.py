@@ -50,15 +50,26 @@ def _serve():
 
 @app.function(image=label_image, gpu="A100-80GB", cpu=12, memory=65536, timeout=23 * 3600,
               secrets=[HF], volumes={"/cache": CACHE})
-def label_pending(repo_key: str = "mommy", budget_h: float = 7.0, chunk: int = 40000, concurrency: int = 64):
-    """Label the pre-staged candidates for one corpus until they run out or the time budget ends."""
+def label_pending(repo_key: str = "mommy", budget_h: float = 7.0, chunk: int = 40000, concurrency: int = 64,
+                  shard: int = 0, n_shards: int = 1):
+    """Label the pre-staged candidates for one corpus until they run out or the time budget ends.
+
+    With n_shards > 1 each worker takes a disjoint slice by uid hash and writes its own ledger file, so two
+    workspaces can label in parallel without the read-append-upload race clobbering each other."""
+    import zlib
     from huggingface_hub import HfApi, hf_hub_download
     repo, ledger = CORPUS[repo_key]
+    if n_shards > 1: ledger = ledger.replace(".jsonl", f".s{shard}.jsonl")
     api = HfApi(); work = Path("/tmp/lab"); work.mkdir(parents=True, exist_ok=True)
     t0 = time.time(); budget_s = budget_h * 3600
 
     done = set()
-    for r, l in (CORPUS["mommy"], CORPUS["daddy"], (CORPUS["mommy"][0], "labels/qwen3omni.jsonl")):
+    api0 = HfApi()
+    ledgers = [CORPUS["mommy"], CORPUS["daddy"], (CORPUS["mommy"][0], "labels/qwen3omni.jsonl")]
+    for r in (CORPUS["mommy"][0], CORPUS["daddy"][0]):   # plus any shard ledgers already on the Hub
+        ledgers += [(r, f) for f in api0.list_repo_files(r, repo_type="dataset")
+                    if f.startswith("labels/qwen3omni") and ".s" in f]
+    for r, l in ledgers:
         try:
             for line in open(hf_hub_download(r, l, repo_type="dataset", force_download=True)):
                 done.add(json.loads(line)["uid"])
@@ -67,6 +78,9 @@ def label_pending(repo_key: str = "mommy", budget_h: float = 7.0, chunk: int = 4
 
     pend = [json.loads(l) for l in open(hf_hub_download(repo, PENDING, repo_type="dataset", force_download=True))]
     todo = [r for r in pend if r["uid"] not in done]
+    if n_shards > 1:
+        todo = [r for r in todo if zlib.crc32(r["uid"].encode()) % n_shards == shard]
+        print(f"shard {shard}/{n_shards}: {len(todo)} of this worker's clips", flush=True)
     print(f"{repo}: {len(pend)} pre-staged, {len(todo)} still to label", flush=True)
     if not todo: return 0
 

@@ -9,6 +9,12 @@ QUERIES = {
     "moaning": ["moaning", "moans", "whimpering", "heavy moaning", "moaning only", "orgasm sounds", "whimpers"],
     "mouth sounds": ["mouth sounds", "wet sounds", "licking", "ear licking", "lip smacking", "sloppy", "slurping", "tongue"],
     "breathing": ["heavy breathing", "breathing", "panting", "breathy"],
+    "tapping": ["tapping", "tapping sounds", "finger tapping", "nail tapping", "asmr tapping"],
+    "scratching": ["scratching", "scratching sounds", "nail scratching", "mic scratching"],
+    "crinkling": ["crinkling", "crinkles", "paper sounds", "plastic crinkle", "wrapper"],
+    "brushing": ["brushing", "brush sounds", "mic brushing", "hair brushing"],
+    "liquid": ["water sounds", "liquid sounds", "pouring", "drinking sounds"],
+
     # breadth: gender/genre queries (deficit tags only lift yield ~1.3x, so NEW creators are what scales the corpus)
     "_generic_f": ["F4M", "F4A", "F4F", "girlfriend", "gfe", "mommy", "wife", "older woman", "comfort", "sleep aid", "cuddles", "roleplay", "script fill", "asmr", "whisper", "gentle fdom", "praise", "teasing"],
     "_round2_f": ["F4M script fill", "F4M improv", "F4M roleplay", "F4M sfw", "F4M nsfw", "F4M audio", "F4A audio", "F4F audio", "F4TM", "F4TF", "fdom", "fsub", "cuddling", "spooning", "massage", "bath", "shower", "reading", "bedtime story", "sleep", "rain", "l-bombs", "wholesome", "yandere", "tsundere", "goth gf", "milf", "big sister", "roommate", "neighbor", "coworker", "boss", "teacher", "nurse", "doctor", "stranger", "vampire", "succubus", "witch", "elf", "goddess", "demon", "android", "monster girl", "fantasy", "sci-fi", "horror", "public", "car", "praise kink", "degradation", "cheating", "breeding", "creampie", "riding", "cowgirl", "blowjob", "handjob", "facesitting", "69", "edging", "joi", "cei", "hypno", "asmr roleplay", "ear to ear", "binaural", "purring", "giggles", "laughing", "crying", "comfort after", "aftercare"],

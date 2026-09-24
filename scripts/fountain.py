@@ -19,8 +19,21 @@ from collections import Counter
 from pathlib import Path
 
 MOMMY, DADDY = "aoxo/t2a-mommy", "aoxo/t2a-daddy"
-LEDGERS = [(MOMMY, "labels/qwen3omni.jsonl"), (MOMMY, "labels/qwen3omni_expansion.jsonl"), (DADDY, "labels/qwen3omni.jsonl")]
+def ledgers() -> list[tuple[str, str]]:
+    """Every label ledger on the Hub, including the per-shard files parallel labeling runs write.
+    Missing these undercounts the corpus and makes the loop keep buying a class that is already full."""
+    from huggingface_hub import HfApi
+    api = HfApi(); out = []
+    for repo in (MOMMY, DADDY):
+        out += [(repo, f) for f in api.list_repo_files(repo, repo_type="dataset")
+                if f.startswith("labels/qwen3omni") and f.endswith(".jsonl")]
+    return out
+# the vocal core, which soundgasm can actually supply
 TARGET_CLASSES = ["kissing", "moaning", "mouth sounds", "breathing"]
+# the physical tail: present in the corpora only in traces (scratching ~370, brushing ~46 out of 3.15M
+# clips), so it gets its own, much lower target and its own queries -- soundgasm is a vocal-ASMR site
+PHYSICAL_CLASSES = ["tapping", "scratching", "crinkling", "brushing", "liquid"]
+PHYSICAL_TARGET_FRAC = 0.1
 
 
 def log(m): print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {m}", flush=True)
@@ -30,7 +43,7 @@ def class_counts(cache: Path) -> Counter:
     """Labeled clips per class, per corpus and combined, straight from the ledgers on the Hub."""
     from huggingface_hub import hf_hub_download
     c = Counter()
-    for repo, name in LEDGERS:
+    for repo, name in ledgers():
         try: p = hf_hub_download(repo, name, repo_type="dataset", cache_dir=str(cache), force_download=True)
         except Exception as e: log(f"  ledger {repo}:{name} unavailable ({type(e).__name__})"); continue
         side = "f" if repo == MOMMY else "m"
@@ -94,9 +107,13 @@ def main() -> int:
                      if min(counts[f"{c}|f"], counts[f"{c}|m"]) < a.target // 2]
         else:
             short = [c for c in TARGET_CLASSES if counts[c] < a.target]
+        phys_target = max(1, int(a.target * PHYSICAL_TARGET_FRAC))
+        short_phys = [c for c in PHYSICAL_CLASSES if counts[c] < phys_target]
         log("  labeled: " + ", ".join(f"{c}={counts[c]} (f{counts[f'{c}|f']}/m{counts[f'{c}|m']})" for c in TARGET_CLASSES))
+        log("  physical: " + ", ".join(f"{c}={counts[c]}" for c in PHYSICAL_CLASSES) + f" (target {phys_target})")
+        short = short + short_phys
         if not short:
-            log(f"  every target class is at or above {a.target}; fountain done"); break
+            log(f"  every class is at target ({a.target} vocal / {phys_target} physical); fountain done"); break
         log(f"  short: {short}")
 
         n_excl = refresh_exclusions(a.state / "existing_creators.txt")
