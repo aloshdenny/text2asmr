@@ -91,10 +91,17 @@ def label_pending(repo_key: str = "mommy", budget_h: float = 7.0, chunk: int = 4
         # per-chunk state: prep resumes per source, so its done-list must not leak across chunks
         for f in ("labels.jsonl", "clap_index.jsonl", "prep_done_sources.txt"): (work / f).unlink(missing_ok=True)
         print(f"chunk {ci}/{len(chunks)}: {len(part)} clips, {left/3600:.1f} h of budget left", flush=True)
-        subprocess.run(["python", "/root/t2a/scripts/label_audios2_qwen3.py", "--stage", "prep", "--work", str(work),
-                        "--workers", "12", "--bg-max", "1.01", "--no-clap"], cwd="/root/t2a", check=True)
+        # overlap CPU cutting with GPU labeling: prep streams clips into clap_index.jsonl and the labeler
+        # follows it, instead of the GPU idling through a whole prep pass
+        (work / "prep.log").unlink(missing_ok=True)
+        prep = subprocess.Popen(["python", "/root/t2a/scripts/label_audios2_qwen3.py", "--stage", "prep", "--work", str(work),
+                                 "--workers", "12", "--bg-max", "1.01", "--no-clap"], cwd="/root/t2a",
+                                stdout=open(work / "prep.log", "w"), stderr=subprocess.STDOUT)
+        (work / "clap_index.jsonl").touch()
         subprocess.run(["python", "/root/t2a/scripts/label_audios2_qwen3.py", "--stage", "label", "--work", str(work),
-                        "--concurrency", str(concurrency), "--delete-wav", "--no-clap"], cwd="/root/t2a", check=True)
+                        "--concurrency", str(concurrency), "--delete-wav", "--no-clap", "--follow", "--chunk", "4000"],
+                       cwd="/root/t2a", check=True)
+        prep.wait(timeout=600)
 
         new = [json.loads(l) for l in open(work / "labels.jsonl")] if (work / "labels.jsonl").exists() else []
         idx = {r["uid"]: r for r in part}

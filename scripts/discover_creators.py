@@ -38,9 +38,12 @@ def search(q, pages, sleep=0.6):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--exclude", required=True); ap.add_argument("--pages", type=int, default=150); ap.add_argument("--out", default="expansion_plan.jsonl")
     ap.add_argument("--min-posts", type=int, default=0); ap.add_argument("--min-seen", type=int, default=3); ap.add_argument("--cap-files", type=int, default=150); ap.add_argument("--mb-per-min", type=float, default=0.75)
+    ap.add_argument("--only-labels", default="", help="comma-separated QUERIES keys to run (default: all); the fountain passes the classes still under target")
     a = ap.parse_args(); excluded = {l.split("\t")[0].strip().lower() for l in open(a.exclude) if l.strip()}
     posts = {}; t0 = time.time()
+    want = {x.strip() for x in a.only_labels.split(",") if x.strip()}
     for label, qs in QUERIES.items():
+        if want and label not in want: continue
         for q in qs:
             n = 0
             for it in search(q, a.pages):
