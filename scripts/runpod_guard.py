@@ -105,6 +105,8 @@ def main() -> int:
             util = max([g.get("gpuUtilPercent") or 0 for g in gpus], default=0)
             status = p.get("desiredStatus") or "?"
             log(f"  {p['name']} ({p['id'][:12]}) {status} up {up_h:.1f} h  gpu {util}%  ${p.get('costPerHr')}/h")
+            if status in ("EXITED", "TERMINATED"):
+                terminate(pid, key, f"pod {status}: free its disk"); continue
             if status != "RUNNING": continue
             if util >= a.idle_util: ever_worked[pid] = True
             if up_h >= a.max_hours:

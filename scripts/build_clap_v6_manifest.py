@@ -137,12 +137,20 @@ def main() -> int:
     ap.add_argument("--already", type=Path, default=None,
                     help="an existing mels index.jsonl; its uids are written to <out>/delta_*.jsonl so prep only "
                          "has to cut what is new")
+    ap.add_argument("--blocked-creators-file", type=Path, default=None,
+                    help="creators reserved for the human eval set ('repo\\tcreator' per line); they are dropped "
+                         "from training entirely, so the human labels never score a model that saw them")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args(); a.out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(a.seed)
 
     rows = load_ledgers(a.cache)
     log(f"{len(rows)} label rows, {len({r['creator'] for r in rows})} creators")
+    if a.blocked_creators_file and a.blocked_creators_file.exists():
+        blocked = {tuple(l.rstrip("\n").split("\t")) for l in a.blocked_creators_file.open() if l.strip()}
+        before = len(rows)
+        rows = [r for r in rows if (r["repo"], r["creator"]) not in blocked]
+        log(f"dropped {before - len(rows)} rows from {len(blocked)} creators reserved for human evaluation")
     by_label = defaultdict(list)
     for r in rows: by_label[r["label"]].append(r)
     log("available: " + ", ".join(f"{k}={len(v)}" for k, v in sorted(by_label.items(), key=lambda kv: -len(kv[1]))))
