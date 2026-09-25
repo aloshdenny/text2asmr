@@ -53,6 +53,9 @@ def main() -> int:
     ap.add_argument("--idle-util", type=float, default=5.0, help="percent GPU below which a pod counts as idle")
     ap.add_argument("--idle-polls", type=int, default=5, help="consecutive idle polls before termination")
     ap.add_argument("--max-hours", type=float, default=14.0)
+    ap.add_argument("--grace-h", type=float, default=0.75, help="model-load grace before idleness counts")
+    ap.add_argument("--never-worked-h", type=float, default=1.25,
+                    help="kill a pod that has never shown GPU work within this many hours of being seen")
     ap.add_argument("--spend-cap", type=float, default=60.0, help="dollars this guard may let the campaign spend")
     ap.add_argument("--balance-floor", type=float, default=15.0)
     ap.add_argument("--state", default="/root/t2a/runpod_guard.json")
@@ -66,6 +69,8 @@ def main() -> int:
     except Exception: pass
 
     idle: dict[str, int] = defaultdict(int)
+    first_seen: dict[str, float] = {}
+    ever_worked: dict[str, bool] = defaultdict(bool)
     last = time.time()
     while True:
         try:
@@ -91,22 +96,30 @@ def main() -> int:
 
         for p in pods:
             rt = p.get("runtime") or {}
-            up_h = (rt.get("uptimeInSeconds") or 0) / 3600.0
+            pid = p["id"]
+            first_seen.setdefault(pid, now)
+            # trust our own clock: a container that keeps restarting reports uptime 0 forever
+            seen_h = (now - first_seen[pid]) / 3600.0
+            up_h = max((rt.get("uptimeInSeconds") or 0) / 3600.0, seen_h)
             gpus = rt.get("gpus") or []
             util = max([g.get("gpuUtilPercent") or 0 for g in gpus], default=0)
             status = p.get("desiredStatus") or "?"
             log(f"  {p['name']} ({p['id'][:12]}) {status} up {up_h:.1f} h  gpu {util}%  ${p.get('costPerHr')}/h")
             if status != "RUNNING": continue
+            if util >= a.idle_util: ever_worked[pid] = True
             if up_h >= a.max_hours:
-                terminate(p["id"], key, f"max runtime {a.max_hours} h"); continue
-            # a pod still loading the model is not idle: only count idleness after the first 45 min
-            if up_h > 0.75 and util < a.idle_util:
-                idle[p["id"]] += 1
-                log(f"    idle {idle[p['id']]}/{a.idle_polls}")
-                if idle[p["id"]] >= a.idle_polls:
-                    terminate(p["id"], key, f"GPU under {a.idle_util}% for {a.idle_polls} polls")
+                terminate(pid, key, f"max runtime {a.max_hours} h"); continue
+            # a pod that has never once used the GPU is a broken bootstrap, not a slow model load
+            if not ever_worked[pid] and seen_h >= a.never_worked_h:
+                terminate(pid, key, f"GPU never went above {a.idle_util}% in {seen_h:.1f} h (bootstrap failed?)"); continue
+            # a pod still loading the model is not idle: only count idleness after the grace period
+            if up_h > a.grace_h and util < a.idle_util:
+                idle[pid] += 1
+                log(f"    idle {idle[pid]}/{a.idle_polls}")
+                if idle[pid] >= a.idle_polls:
+                    terminate(pid, key, f"GPU under {a.idle_util}% for {a.idle_polls} polls")
             else:
-                idle[p["id"]] = 0
+                idle[pid] = 0
         time.sleep(a.interval)
 
 

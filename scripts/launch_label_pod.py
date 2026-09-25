@@ -27,11 +27,16 @@ def bootstrap(repo_key: str, budget_h: float, shard: int, n_shards: int, concurr
     """One shell command; it must be idempotent because RunPod re-runs it if the container restarts."""
     return " && ".join([
         "set -x",
-        "apt-get update -qq && apt-get install -y -qq ffmpeg git",
-        "pip install -q --no-input 'huggingface_hub>=0.25' soundfile",
+        "nvidia-smi",
+        "apt-get update -qq && apt-get install -y -qq ffmpeg git ninja-build",
+        "pip install -q --no-input uv",
+        # the wheel + index combination proven on Modal; plain `pip install vllm` drags in its own torch
+        "uv pip install --system --index-strategy unsafe-best-match "
+        "'https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl' "
+        "--extra-index-url https://download.pytorch.org/whl/cu129 qwen-omni-utils soundfile 'huggingface_hub>=0.25' ninja",
         f"(test -d /workspace/t2a || git clone --depth 1 {GIT} /workspace/t2a)",
         "cd /workspace/t2a && git pull -q || true",
-        "export PYTHONPATH=/workspace/t2a HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 T2A_DIR=/workspace/t2a",
+        "export PYTHONPATH=/workspace/t2a HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 T2A_DIR=/workspace/t2a VLLM_USE_FLASHINFER_SAMPLER=0",
         # the pod shuts itself down the moment the work is done; the droplet guard is only the backstop
         f"(python /workspace/t2a/scripts/label_pod.py --repo-key {repo_key} --budget-h {budget_h} "
         f"--shard {shard} --n-shards {n_shards} --concurrency {concurrency} 2>&1 | tee /workspace/label.log; "
@@ -48,7 +53,7 @@ def main() -> int:
     ap.add_argument("--n-shards", type=int, default=1)
     ap.add_argument("--concurrency", type=int, default=96)
     ap.add_argument("--disk", type=int, default=120, help="container disk GB; clips are cut and deleted per chunk")
-    ap.add_argument("--image", default="vllm/vllm-openai:latest")
+    ap.add_argument("--image", default="runpod/pytorch:1.4.0-rc.164-cu1290-torch291-ubuntu2204")
     ap.add_argument("--max-price", type=float, default=2.0, help="refuse to launch above this $/h")
     ap.add_argument("--name", default="")
     ap.add_argument("--dry-run", action="store_true")
@@ -68,6 +73,10 @@ def main() -> int:
 
     env = [{"key": "HF_TOKEN", "value": hf}, {"key": "HF_HUB_DISABLE_XET", "value": "1"}]
     pk = os.environ.get("PUBLIC_KEY", "")
+    if not pk:
+        for cand in (os.path.expanduser("~/.ssh/id_ed25519.pub"), os.path.expanduser("~/.ssh/id_rsa.pub")):
+            if os.path.exists(cand):
+                pk = open(cand).read().strip(); break      # so the pod's own log can be read, not just its GPU meter
     if pk: env.append({"key": "PUBLIC_KEY", "value": pk})
     envs = ", ".join("{key: \"%s\", value: \"%s\"}" % (e["key"], e["value"]) for e in env)
     cmd = bootstrap(a.repo_key, a.budget_h, a.shard, a.n_shards, a.concurrency).replace('"', '\\"')
