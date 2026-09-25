@@ -10,12 +10,16 @@
 set -euo pipefail
 
 BROWSER="${1:-chrome}"
+# PATH order differs under launchd: ~/.local/bin holds a yt-dlp bound to python3.9, which yt-dlp refuses to
+# run on. Pin the working binary rather than trusting whatever the environment resolves first.
+YTDLP="${T2A_YTDLP:-/opt/homebrew/bin/yt-dlp}"
+[ -x "$YTDLP" ] || YTDLP="$(command -v yt-dlp)"
 DROPLET="${T2A_DROPLET:-root@139.59.33.163}"
 TMP="$(mktemp -t ytcookies).txt"
 trap 'rm -f "$TMP"' EXIT
 
 echo "exporting cookies from $BROWSER (Keychain may prompt) ..."
-yt-dlp --cookies-from-browser "$BROWSER" --cookies "$TMP" --simulate --quiet \
+"$YTDLP" --cookies-from-browser "$BROWSER" --cookies "$TMP" --simulate --quiet \
        "https://www.youtube.com/watch?v=aqz-KE-bpKQ" >/dev/null
 
 lines=$(grep -c . "$TMP" || true)
