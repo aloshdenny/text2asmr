@@ -36,27 +36,31 @@ ONTOLOGY = ["kissing", "mouth sounds", "breathing", "moaning", "whispering", "no
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 
-def load_labels(cache: str) -> list[dict]:
+def stream_labels(cache: str):
+    """Yield (repo, uid, label, source, creator) one row at a time.
+
+    Four million rows as dicts is ~4 GB and the droplet has 1 GB, so nothing here is ever materialised:
+    callers make two passes and keep only aggregates or the reserved-creator subset."""
     from huggingface_hub import HfApi, hf_hub_download
-    api = HfApi(); rows = []
+    api = HfApi()
     for repo in (MOMMY, DADDY):
         for f in api.list_repo_files(repo, repo_type="dataset"):
             if not (f.startswith("labels/qwen3omni") and f.endswith(".jsonl")): continue
             try: p = hf_hub_download(repo, f, repo_type="dataset", cache_dir=cache, force_download=True)
             except Exception as e: log(f"  skip {repo}:{f} ({type(e).__name__})"); continue
             n = 0
-            for line in open(p):
-                try: r = json.loads(line)
-                except Exception: continue
-                uid = r.get("uid", "")
-                src = r.get("source") or (uid.rsplit(".m4a_", 1)[0] + ".m4a" if ".m4a_" in uid else None)
-                if not src or not r.get("label"): continue
-                rows.append({"uid": uid, "label": r["label"], "source": src,
-                             "creator": src.split("/")[0], "repo": repo}); n += 1
+            with open(p) as fh:
+                for line in fh:
+                    try: r = json.loads(line)
+                    except Exception: continue
+                    uid = r.get("uid", "")
+                    src = r.get("source") or (uid.rsplit(".m4a_", 1)[0] + ".m4a" if ".m4a_" in uid else None)
+                    if not src or not r.get("label"): continue
+                    yield repo, uid, r["label"], src, src.split("/")[0]
+                    n += 1
             log(f"  {repo}:{f} -> {n}")
             try: os.remove(os.path.realpath(p))
             except OSError: pass
-    return rows
 
 
 def main() -> int:
@@ -73,12 +77,12 @@ def main() -> int:
     a.out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(a.seed)
 
-    rows = load_labels(a.cache)
-    log(f"{len(rows)} label rows, {len({r['creator'] for r in rows})} creators")
-
-    # reserve creators: prefer ones with a wide spread of classes, so the eval is not a handful of voices
+    # pass 1: per-creator class counts only (thousands of small Counters, not millions of rows)
     by_creator: dict[tuple, Counter] = defaultdict(Counter)
-    for r in rows: by_creator[(r["repo"], r["creator"])][r["label"]] += 1
+    total = 0
+    for repo, uid, label, src, creator in stream_labels(a.cache):
+        by_creator[(repo, creator)][label] += 1; total += 1
+    log(f"{total} label rows, {len(by_creator)} creators")
     ranked = sorted(by_creator.items(), key=lambda kv: (-len(kv[1]), -sum(kv[1].values())))
     pool = [k for k, _ in ranked if sum(by_creator[k].values()) >= 40]
     rng.shuffle(pool)
@@ -86,10 +90,15 @@ def main() -> int:
     log(f"reserved {len(reserved)} creators "
         f"({sum(1 for r, _ in reserved if r == MOMMY)} female / {sum(1 for r, _ in reserved if r == DADDY)} male)")
 
-    held = [r for r in rows if (r["repo"], r["creator"]) in reserved]
-    log(f"{len(held)} clips live in reserved creators")
+    # pass 2: keep only the reserved creators' rows (a few hundred thousand at most)
     by_label: dict[str, list] = defaultdict(list)
-    for r in held: by_label[r["label"]].append(r)
+    held_n = 0
+    for repo, uid, label, src, creator in stream_labels(a.cache):
+        if (repo, creator) not in reserved: continue
+        by_label[label].append({"uid": uid, "label": label, "source": src, "creator": creator, "repo": repo})
+        held_n += 1
+    held = [r for rs in by_label.values() for r in rs]
+    log(f"{held_n} clips live in reserved creators")
 
     picked: list[dict] = []
     taken_per_creator: Counter = Counter()
