@@ -19,6 +19,8 @@ import argparse, json, os, queue, subprocess, threading, time
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from text2asmr.io_guard import preflight
+
 import numpy as np
 
 SR = 48_000; MAX_S = SR * 10; FRAMES = 1001; MELS = 64; N_FFT = 1024; HOP = 480
@@ -129,6 +131,7 @@ def main() -> int:
     ap.add_argument("--cache", default=os.environ.get("T2A_CACHE", "hfcache"))
     a = ap.parse_args()
     a.state.mkdir(parents=True, exist_ok=True)
+    preflight(a.state / f"scores_{a.repo.split(chr(47))[-1]}.jsonl", note="scorer output")
     tag = a.repo.split("/")[-1]
     from huggingface_hub import HfApi, hf_hub_download
     api = HfApi(); token = os.environ["HF_TOKEN"]

@@ -18,6 +18,8 @@ prep stages consume.  Network-only: safe for the DO droplet, which holds nothing
 from __future__ import annotations
 import argparse, json, os, sys, threading, time
 from pathlib import Path
+
+from text2asmr.io_guard import preflight
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -67,6 +69,7 @@ def main() -> int:
     a = ap.parse_args()
     a.state.mkdir(parents=True, exist_ok=True)
     cache = a.state / "cache"; cache.mkdir(exist_ok=True)
+    preflight(a.state / f"dense_{a.repo.split(chr(47))[-1]}.jsonl", note="miner output")
     tag = a.repo.split("/")[-1]
     out_path = a.state / f"dense_{tag}.jsonl"
     done_path = a.state / f"done_{tag}.txt"

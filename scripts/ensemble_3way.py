@@ -20,6 +20,8 @@ from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
 
+from text2asmr.io_guard import JsonlSink, preflight, safe_name
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -86,32 +88,27 @@ def stage_judge(a):
     clips = json.loads((a.work / "clips.json").read_text())
     log(f"{len(clips)} clips to judge")
     for name in [m.strip() for m in a.models.split(",") if m.strip()]:
-        safe = name.replace("/", "_").replace(":", "-")   # model ids contain slashes; keep them out of paths
-        out_path = a.work / f"judge_{safe}.jsonl"
-        have = set()
-        if out_path.exists():
-            for l in out_path.open():
-                try: have.add(json.loads(l)["uid"])
-                except Exception: pass
-        todo = [c for c in clips if c["uid"] not in have]
+        out_path = a.work / f"judge_{safe_name(name)}.jsonl"
+        sink = JsonlSink(out_path, key="uid")          # proves the path is writable before any paid call
+        todo = [c for c in clips if c["uid"] not in sink.seen]
         if not todo: log(f"{name}: already complete"); continue
         if name.startswith("or:"):
             model = name[3:]
             log(f"{name}: judging {len(todo)} clips via OpenRouter (cap ${a.max_cost})")
-            res = run_openrouter(a, todo, model, name)
+            res = run_openrouter(a, todo, model, name, sink)
         else:
             runner = bench.MODELS.get(name)
             if not runner: log(f"{name}: no such runner in bench (have {sorted(bench.MODELS)})"); continue
             log(f"{name}: judging {len(todo)} clips")
             res = runner(a, todo)
-        with out_path.open("a") as fh:
-            for r in res: fh.write(json.dumps(r) + "\n")
+            sink.extend(res)                            # GPU runners still return in bulk
+        sink.close()
         log(f"{name}: saved -> {out_path}")
         got = Counter(r.get("label") for r in res)
         log(f"{name}: wrote {len(res)} -> {dict(got)}")
 
 
-def run_openrouter(a, clips, model: str, name: str):
+def run_openrouter(a, clips, model: str, name: str, sink=None):
     """Judge via OpenRouter. Network-only, so it runs on the droplet while the GPU box is down, and it is
     the only judge here from a family that had no hand in our training labels."""
     import base64, urllib.request
@@ -148,6 +145,7 @@ def run_openrouter(a, clips, model: str, name: str):
                 cost = float(u.get("cost") or 0.0) or (u.get("prompt_tokens", 0) * 2e-6 + u.get("completion_tokens", 0) * 12e-6)
                 spent[0] += cost
             return {"uid": c["uid"], "raw": txt.strip()[:200], "label": parse(txt),
+                    "gen_id": d.get("id"),              # lets /generation recover this row if the file is lost
                     "prompt_tokens": u.get("prompt_tokens"), "completion_tokens": u.get("completion_tokens")}
         except Exception as e:
             err = getattr(e, "read", lambda: b"")()
@@ -157,6 +155,7 @@ def run_openrouter(a, clips, model: str, name: str):
     with ThreadPoolExecutor(max_workers=a.concurrency) as ex:
         for i, r in enumerate(ex.map(one, clips)):
             out.append(r)
+            if sink is not None: sink.write(r)          # paid work reaches disk before the next call starts
             if i % 25 == 0: log(f"  {name} {i}/{len(clips)} spent=${spent[0]:.3f} last={r.get('label')} err={r.get('error','')[:40]}")
     log(f"{name}: done, ${spent[0]:.3f} spent")
     return out

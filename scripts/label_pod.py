@@ -16,6 +16,8 @@ import argparse, json, os, subprocess, time, zlib
 from collections import defaultdict
 from pathlib import Path
 
+from text2asmr.io_guard import preflight
+
 CORPUS = {"mommy": ("aoxo/t2a-mommy", "labels/qwen3omni_expansion.jsonl"),
           "daddy": ("aoxo/t2a-daddy", "labels/qwen3omni.jsonl")}
 MODEL = os.environ.get("T2A_LABEL_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
@@ -55,6 +57,7 @@ def main() -> int:
     repo, ledger = CORPUS[a.repo_key]
     if a.n_shards > 1: ledger = ledger.replace(".jsonl", f".s{a.shard}.jsonl")
     api = HfApi(); a.work.mkdir(parents=True, exist_ok=True)
+    preflight(a.work / "candidates.jsonl", a.work / "ledger.jsonl", note="RunPod pod output")
     t0 = time.time(); budget_s = a.budget_h * 3600
 
     files = api.list_repo_files(repo, repo_type="dataset")
