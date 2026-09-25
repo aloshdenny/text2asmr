@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from huggingface_hub import HfApi, hf_hub_download
 from text2asmr.data.segment import load_alignment
 
-PENDING_DENSE = "labels/pending_candidates_dense.jsonl"
+PENDING_DENSE = "labels/pending_candidates_dense.part{:02d}.jsonl"   # parts keep local disk bounded
 
 
 def log(m): print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {m}", flush=True)
@@ -98,8 +98,14 @@ def main() -> int:
     fh = out_path.open("a"); df = done_path.open("a")
 
     def one(src: str):
-        try: entries = load_alignment(hf_hub_download(a.repo, src + ".json", repo_type="dataset", cache_dir=str(cache)))
+        try:
+            path = hf_hub_download(a.repo, src + ".json", repo_type="dataset", cache_dir=str(cache))
+            entries = load_alignment(path)
         except Exception: return src, []
+        finally:
+            # the droplet has ~15 GB: an alignment JSON is only needed for the moment it is parsed
+            try: os.remove(os.path.realpath(path))
+            except Exception: pass
         rows = []
         for g0, g1 in gaps(entries):
             for gstart, cut_start, cut_dur in windows(g0, g1, a.min_gap, a.window, a.stride, a.pad):
@@ -110,13 +116,22 @@ def main() -> int:
                              "cut_start": cut_start, "cut_duration": cut_dur, "dense": True})
         return src, rows
 
+    part_path = a.state / f"part_{tag}.txt"
+    part = [int(part_path.read_text().strip())] if part_path.exists() else [0]
+
     def publish():
+        """Upload the current part, then truncate locally so disk use stays flat."""
+        nonlocal fh
         if not out_path.exists() or out_path.stat().st_size == 0: return
+        name = PENDING_DENSE.format(part[0])
         for attempt in range(4):
             try:
-                api.upload_file(path_or_fileobj=str(out_path), path_in_repo=PENDING_DENSE, repo_id=a.repo,
-                                repo_type="dataset", commit_message=f"dense gap mining: {stats['clips']} candidate clips")
-                log(f"  uploaded {PENDING_DENSE} ({stats['clips']} clips)"); return
+                api.upload_file(path_or_fileobj=str(out_path), path_in_repo=name, repo_id=a.repo,
+                                repo_type="dataset", commit_message=f"dense gap mining part {part[0]}: {stats['clips']} clips so far")
+                log(f"  uploaded {name}")
+                fh.close(); out_path.unlink(); fh = out_path.open("a")
+                part[0] += 1; part_path.write_text(str(part[0]))
+                return
             except Exception as e:
                 log(f"  upload retry {attempt}: {type(e).__name__} {str(e)[:110]}"); time.sleep(30 * (attempt + 1))
 

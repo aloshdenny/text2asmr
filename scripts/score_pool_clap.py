@@ -23,7 +23,7 @@ import numpy as np
 
 SR = 48_000; MAX_S = SR * 10; FRAMES = 1001; MELS = 64; N_FFT = 1024; HOP = 480
 RARE_WEIGHT = {"kissing": 3.0, "moaning": 2.0, "mouth sounds": 1.5, "breathing": 0.5}
-POOLS = ("labels/pending_candidates_dense.jsonl", "labels/pending_candidates.jsonl")
+POOL_PREFIX = "labels/pending_candidates"   # the dense miner writes numbered parts alongside the first pass
 
 
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
@@ -137,7 +137,9 @@ def main() -> int:
     log(f"{len(labeled)} uids already labeled")
 
     pool = []
-    for name in POOLS:
+    pool_files = sorted(f for f in api.list_repo_files(a.repo, repo_type="dataset") if f.startswith(POOL_PREFIX))
+    log(f"candidate pools: {pool_files}")
+    for name in pool_files:
         try: p = hf_hub_download(a.repo, name, repo_type="dataset", cache_dir=a.cache, force_download=True)
         except Exception as e: log(f"no {name} ({type(e).__name__})"); continue
         n = 0
