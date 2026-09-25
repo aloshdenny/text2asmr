@@ -86,7 +86,8 @@ def stage_judge(a):
     clips = json.loads((a.work / "clips.json").read_text())
     log(f"{len(clips)} clips to judge")
     for name in [m.strip() for m in a.models.split(",") if m.strip()]:
-        out_path = a.work / f"judge_{name}.jsonl"
+        safe = name.replace("/", "_").replace(":", "-")   # model ids contain slashes; keep them out of paths
+        out_path = a.work / f"judge_{safe}.jsonl"
         have = set()
         if out_path.exists():
             for l in out_path.open():
@@ -105,6 +106,7 @@ def stage_judge(a):
             res = runner(a, todo)
         with out_path.open("a") as fh:
             for r in res: fh.write(json.dumps(r) + "\n")
+        log(f"{name}: saved -> {out_path}")
         got = Counter(r.get("label") for r in res)
         log(f"{name}: wrote {len(res)} -> {dict(got)}")
 
@@ -174,7 +176,7 @@ def stage_report(a):
     clips = {c["uid"]: c for c in json.loads((a.work / "clips.json").read_text())}
     judges: dict[str, dict[str, str]] = {"qwen3-omni": {u: c["stratum"] for u, c in clips.items()}}
     for p in sorted(a.work.glob("judge_*.jsonl")):
-        name = p.stem.replace("judge_", "")
+        name = p.stem.replace("judge_", "").replace("or_", "")
         d = {}
         for l in p.open():
             try: r = json.loads(l)
