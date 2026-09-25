@@ -30,16 +30,18 @@ if [ "${yt:-0}" -lt 5 ]; then
 fi
 echo "jar looks valid: $lines lines, $yt youtube.com entries"
 
-scp -q "$TMP" "$DROPLET:/root/t2a/cookies.txt"
-ssh "$DROPLET" 'chmod 600 /root/t2a/cookies.txt'
+# Stage first, verify there, and only then move into place. Installing before verifying means one dead
+# export replaces a jar that still worked -- which is exactly what happened on the 22:29 unattended run.
+scp -q "$TMP" "$DROPLET:/root/t2a/cookies.staged"
+ssh "$DROPLET" 'chmod 600 /root/t2a/cookies.staged'
 
-# prove it authenticates before restarting anything, so a dead jar is never installed silently
-if ssh "$DROPLET" 'cd /root/t2a && ./venv/bin/yt-dlp --cookies cookies.txt --simulate --print "%(title).30s" \
+if ssh "$DROPLET" 'cd /root/t2a && ./venv/bin/yt-dlp --cookies cookies.staged --simulate --print "%(title).30s" \
       "https://www.youtube.com/watch?v=aqz-KE-bpKQ" 2>/dev/null | grep -q .'; then
-  echo "verified: the droplet can authenticate with the new jar"
-  ssh "$DROPLET" 'systemctl restart t2a-yt'
-  echo "t2a-yt restarted; backoff penalty cleared"
+  ssh "$DROPLET" 'mv /root/t2a/cookies.staged /root/t2a/cookies.txt && systemctl restart t2a-yt'
+  echo "verified and installed; t2a-yt restarted, backoff penalty cleared"
 else
-  echo "the new jar did not authenticate on the droplet — leaving t2a-yt alone" >&2
+  ssh "$DROPLET" 'rm -f /root/t2a/cookies.staged'
+  echo "the exported jar does not authenticate — the existing cookies.txt was left untouched" >&2
+  echo "(log in to YouTube in a private window, then re-run this script)" >&2
   exit 1
 fi
