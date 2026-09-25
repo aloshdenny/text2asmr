@@ -27,6 +27,7 @@ def bootstrap(repo_key: str, budget_h: float, shard: int, n_shards: int, concurr
     """One shell command; it must be idempotent because RunPod re-runs it if the container restarts."""
     return " && ".join([
         "set -x",
+        "(bash /start.sh > /workspace/start.log 2>&1 &) || service ssh start || true",   # keep sshd: logs matter
         "nvidia-smi",
         "apt-get update -qq && apt-get install -y -qq ffmpeg git ninja-build",
         "pip install -q --no-input uv",
