@@ -17,10 +17,19 @@ def wav_path(work, uid):
     return p
 SR = 48000; FRAMES, MELS = 1001, 64; MERGE = {"breathing heavy": "breathing", "breathing close": "breathing"}
 CHOICES = ["kissing", "mouth sounds", "breathing", "whispering", "moaning", "normal speech", "silence", "tapping", "scratching", "crinkling", "brushing", "liquid", "other sound"]
+# The kissing / mouth-sounds boundary was undefined here ("lip/kiss sounds" vs "lip smacks"), and three
+# judges disagreed on 70-80% of mouth-sounds clips as a result. The rule below is discrete-gesture vs
+# continuous-texture, which is a distinction a listener can actually apply.
 PROMPT = ("You are labeling a short clip from an ASMR recording. Listen and pick the ONE label that best describes the MAIN sound.\n"
           "Labels: " + ", ".join(CHOICES) + ".\n"
-          "Guidance: 'whispering' only if the clip is mostly whispered words; ordinary spoken words = 'normal speech'; a moan or sexual vocalization = 'moaning'; "
-          "lip/kiss sounds with no words = 'kissing'; wet clicks, lip smacks, licking, tongue sounds = 'mouth sounds'; audible in/out breaths with no words = 'breathing'; near-silent = 'silence'.\n"
+          "Guidance: 'whispering' only if the clip is mostly whispered words; ordinary spoken words = 'normal speech'; "
+          "a moan, whimper or sexual vocalization = 'moaning'; audible in/out breaths with no words = 'breathing'; near-silent = 'silence'.\n"
+          "KISSING vs MOUTH SOUNDS - decide by gesture, not by wetness:\n"
+          "  'kissing' = discrete kiss gestures: lips pucker and release, making separate percussive smacks, "
+          "often repeated at a steady rhythm or aimed at the microphone (mwah, pecks). Each event has a clear start and end.\n"
+          "  'mouth sounds' = continuous or irregular oral texture with no kiss gesture: licking, tongue movement, "
+          "saliva and wet clicks, sucking, lip smacking between words. It flows rather than landing as separate smacks.\n"
+          "  If both occur, pick whichever fills more of the clip.\n"
           "Answer with only the label.")
 def parse(text):
     t = (text or "").lower().strip().strip('."\'`*:').replace("_", " ")
