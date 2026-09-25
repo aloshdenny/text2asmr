@@ -29,14 +29,23 @@ POOL_PREFIX = "labels/pending_candidates"   # the dense miner writes numbered pa
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 
-def decode_url(url, token, start, dur):
-    """Pull only the clip's byte range from the Hub: a clip from a 30-min source costs ~1 MB, not ~28 MB."""
-    cmd = ["ffmpeg", "-v", "error", "-threads", "1",
-           "-headers", f"Authorization: Bearer {token}\r\n", "-reconnect", "1", "-reconnect_streamed", "1",
-           "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", url,
+def decode_file(path, start, dur):
+    """Cut one clip out of a local file."""
+    cmd = ["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(path),
            "-f", "f32le", "-acodec", "pcm_f32le", "-ar", str(SR), "-ac", "1", "-"]
-    out = subprocess.run(cmd, capture_output=True, check=True, timeout=300).stdout
+    out = subprocess.run(cmd, capture_output=True, check=True, timeout=120).stdout
     return np.frombuffer(out, dtype=np.float32).copy()
+
+
+def duration_of(path) -> float:
+    """Clip geometry recomputed from alignments can run past the real audio; skip those instead of
+    paying ffmpeg to fail on ~19% of requests."""
+    try:
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                              "-of", "default=nw=1:nk=1", str(path)], capture_output=True, timeout=60).stdout
+        return float(out.strip() or 0.0)
+    except Exception:
+        return 0.0
 
 
 def repeatpad(w: np.ndarray) -> np.ndarray:
@@ -115,7 +124,7 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=400000, help="clips to actually score on the GPU (stage 2)")
     ap.add_argument("--keep", type=int, default=150000, help="clips to write into the label queue")
     ap.add_argument("--batch", type=int, default=64)
-    ap.add_argument("--workers", type=int, default=16, help="parallel range-decoders feeding the GPU")
+    ap.add_argument("--workers", type=int, default=12, help="parallel source fetchers feeding the GPU")
     ap.add_argument("--min-target-p", type=float, default=0.35, help="keep a clip if some target class beats this")
     ap.add_argument("--cache", default=os.environ.get("T2A_CACHE", "hfcache"))
     a = ap.parse_args()
@@ -167,18 +176,32 @@ def main() -> int:
         log(f"resuming: {len(done)} already scored")
     todo = [r for r in stage1 if r["uid"] not in done]
 
+    by_source: dict[str, list] = defaultdict(list)
+    for r in todo: by_source[r["source"]].append(r)
+    sources = list(by_source)
+    log(f"{len(todo)} clips over {len(sources)} sources ({len(todo)/max(len(sources),1):.0f} per source)")
+
     q: queue.Queue = queue.Queue(maxsize=a.batch * 8)
-    def producer(rows):
-        for r in rows:
-            url = f"https://huggingface.co/datasets/{a.repo}/resolve/main/{r['source']}"
+    def producer(srcs):
+        for src in srcs:
+            local = None
             try:
-                w = repeatpad(decode_url(url, token, r.get("cut_start", r["start"]), r.get("cut_duration", 8.0)))
-                q.put((r, w))
+                local = hf_hub_download(a.repo, src, repo_type="dataset", cache_dir=str(a.state / "audio"))
+                dur = duration_of(local)
+                for r in by_source[src]:
+                    cs, cd = r.get("cut_start", r["start"]), r.get("cut_duration", 8.0)
+                    if dur and cs >= dur - 0.2: q.put((r, None)); continue
+                    try: q.put((r, repeatpad(decode_file(local, cs, min(cd, max(dur - cs, 0.5)))))) 
+                    except Exception: q.put((r, None))
             except Exception:
-                q.put((r, None))
+                for r in by_source[src]: q.put((r, None))
+            finally:
+                if local:
+                    try: os.remove(os.path.realpath(local))
+                    except Exception: pass
         q.put(None)
 
-    chunks = [todo[i::a.workers] for i in range(a.workers)]
+    chunks = [sources[i::a.workers] for i in range(a.workers)]
     threads = [threading.Thread(target=producer, args=(c,), daemon=True) for c in chunks]
     for t in threads: t.start()
 
