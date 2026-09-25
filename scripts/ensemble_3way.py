@@ -35,6 +35,12 @@ def stage_cut(a):
     from huggingface_hub import hf_hub_download
     rows = [json.loads(l) for l in open(a.manifest) if l.strip()]
     rows = [r for r in rows if r.get("stratum") in THREE]
+    for r in rows:
+        # the sampler strips geometry to keep the model's guess away from the annotator; the uid still
+        # carries the gap start in milliseconds, and the cut convention is 1 s of pre-roll, 8 s long
+        if "cut_start" not in r and ".m4a_" in r["uid"]:
+            start = int(r["uid"].rsplit(".m4a_", 1)[1]) / 1000.0
+            r["start"] = start; r["cut_start"] = max(0.0, start - 1.0); r["cut_duration"] = 8.0
     log(f"{len(rows)} clips in the three strata")
     wav_dir = a.work / "wav"; wav_dir.mkdir(parents=True, exist_ok=True)
     by_src = defaultdict(list)
@@ -68,7 +74,12 @@ def stage_cut(a):
 
 def stage_judge(a):
     """Reuse the benchmark's model runners, with the open-set prompt swapped for a forced choice."""
-    import bench_audio_llms as bench
+    try:
+        import bench_audio_llms as bench
+        bench.CHOICES = THREE
+    except Exception as e:                      # GPU runners are optional; OpenRouter judges need no torch
+        log(f"bench runners unavailable ({type(e).__name__}); OpenRouter judges still work")
+        class bench: MODELS = {}; CHOICES = THREE; PROMPT = ""
     bench.CHOICES = THREE
     bench.PROMPT = ("This is a short clip from an ASMR recording. It contains exactly one of these three sounds. "
                     "Answer with one of these three labels only, nothing else: kissing, moaning, mouth sounds.")
@@ -83,14 +94,70 @@ def stage_judge(a):
                 except Exception: pass
         todo = [c for c in clips if c["uid"] not in have]
         if not todo: log(f"{name}: already complete"); continue
-        runner = bench.MODELS.get(name)
-        if not runner: log(f"{name}: no such runner in bench (have {sorted(bench.MODELS)})"); continue
-        log(f"{name}: judging {len(todo)} clips")
-        res = runner(a, todo)
+        if name.startswith("or:"):
+            model = name[3:]
+            log(f"{name}: judging {len(todo)} clips via OpenRouter (cap ${a.max_cost})")
+            res = run_openrouter(a, todo, model, name)
+        else:
+            runner = bench.MODELS.get(name)
+            if not runner: log(f"{name}: no such runner in bench (have {sorted(bench.MODELS)})"); continue
+            log(f"{name}: judging {len(todo)} clips")
+            res = runner(a, todo)
         with out_path.open("a") as fh:
             for r in res: fh.write(json.dumps(r) + "\n")
         got = Counter(r.get("label") for r in res)
         log(f"{name}: wrote {len(res)} -> {dict(got)}")
+
+
+def run_openrouter(a, clips, model: str, name: str):
+    """Judge via OpenRouter. Network-only, so it runs on the droplet while the GPU box is down, and it is
+    the only judge here from a family that had no hand in our training labels."""
+    import base64, urllib.request
+    key = os.environ["OPENROUTER_API_KEY_GS"]
+    prompt = ("This is a short clip from an ASMR recording. It contains exactly one of these three sounds. "
+              "Answer with one of these three labels only, nothing else: kissing, moaning, mouth sounds.")
+    spent = [0.0]; lock = threading.Lock(); out = []
+
+    def parse(t: str):
+        t = (t or "").lower()
+        for c in ("mouth sounds", "mouth_sounds", "kissing", "moaning"):
+            if c in t: return "mouth sounds" if c.startswith("mouth") else c
+        return None
+
+    def one(c):
+        if spent[0] >= a.max_cost: return {"uid": c["uid"], "raw": None, "label": None, "error": "budget"}
+        try:
+            wav = base64.b64encode(open(c["wav"], "rb").read()).decode()
+            body = {"model": model, "temperature": 0, "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "input_audio", "input_audio": {"data": wav, "format": "wav"}}]}]}
+            if a.reasoning: body["reasoning"] = {"effort": a.reasoning}
+            req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions",
+                data=json.dumps(body).encode(),
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                         "HTTP-Referer": "https://github.com/aloshdenny/text2asmr"})
+            d = json.loads(urllib.request.urlopen(req, timeout=300).read())
+            if "error" in d: return {"uid": c["uid"], "raw": None, "label": None, "error": str(d["error"])[:120]}
+            u = d.get("usage") or {}
+            txt = (d["choices"][0]["message"].get("content") or "")
+            with lock:
+                # if OpenRouter has not attributed a cost yet, price it from tokens so the cap still holds
+                cost = float(u.get("cost") or 0.0) or (u.get("prompt_tokens", 0) * 2e-6 + u.get("completion_tokens", 0) * 12e-6)
+                spent[0] += cost
+            return {"uid": c["uid"], "raw": txt.strip()[:200], "label": parse(txt),
+                    "prompt_tokens": u.get("prompt_tokens"), "completion_tokens": u.get("completion_tokens")}
+        except Exception as e:
+            err = getattr(e, "read", lambda: b"")()
+            return {"uid": c["uid"], "raw": None, "label": None, "error": f"{type(e).__name__} {str(e)[:60]} {err[:120]}"}
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=a.concurrency) as ex:
+        for i, r in enumerate(ex.map(one, clips)):
+            out.append(r)
+            if i % 25 == 0: log(f"  {name} {i}/{len(clips)} spent=${spent[0]:.3f} last={r.get('label')} err={r.get('error','')[:40]}")
+    log(f"{name}: done, ${spent[0]:.3f} spent")
+    return out
 
 
 def kappa(pairs: list[tuple[str, str]]) -> float:
@@ -151,7 +218,11 @@ def main() -> int:
     ap.add_argument("--work", type=Path, default=Path("/home/tinkerspace/t2a/ens"))
     ap.add_argument("--manifest", type=Path, default=None, help="human eval manifest (needs stratum + geometry)")
     ap.add_argument("--stage", default="cut,judge,report")
-    ap.add_argument("--models", default="voxtral-mini-3b")
+    ap.add_argument("--models", default="voxtral-mini-3b",
+                    help="bench runner names, and/or 'or:<openrouter model>' which needs no GPU")
+    ap.add_argument("--max-cost", type=float, default=3.0, help="hard USD cap per OpenRouter judge")
+    ap.add_argument("--reasoning", default="", help="OpenRouter reasoning effort: low/medium/high, blank for none")
+    ap.add_argument("--concurrency", type=int, default=8)
     a = ap.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     for st in a.stage.split(","):
