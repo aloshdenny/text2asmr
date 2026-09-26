@@ -92,3 +92,34 @@ If trigger-conditioned generation turns out not to matter perceptually — if li
 whisper with no trigger control above a clumsy one with perfect trigger placement — then their approach is
 simply the right one and our ontology work buys nothing at generation time. That is testable in the first
 ASMR-MOS study, and it should be tested early, before we spend a generator-scale training budget on it.
+
+## 8. Ontology decision, 2026-09-26: kissing + mouth sounds -> oral sounds
+
+Five judges from four families (Gemini 3.1 Pro, Gemini 3.8 Flash, Perceptron mk1.5, Xiaomi MiMo v2.5,
+Qwen3-Omni) were given the same 398 held-out clips and the same forced three-way question.
+
+| | kissing / mouth sounds / moaning | oral sounds / moaning |
+|---|---|---|
+| mean pairwise agreement | 66.3% | **82.8%** |
+| worst pair | 58.3% | **76.4%** |
+| unanimous clips | 41% | **65%** |
+
+With three options, chance agreement is 33%. Several cross-family pairs on *mouth sounds alone* landed at
+20-45% -- at or below chance. Merging lifts every single pair.
+
+Two earlier attempts to fix this without merging both failed, which is what makes the merge defensible
+rather than lazy:
+
+* the class definitions in our own prompt overlapped ("lip/kiss sounds" vs "lip smacks"). Rewriting them as
+  discrete gesture vs continuous texture moved Qwen3-vs-Gemini agreement on mouth sounds from 30.7% to
+  48.0% and stalled there.
+* of the clips still disputed after that fix, a quarter were called *moaning* by Gemini -- the audio is
+  genuinely multi-label, and no single-choice question can represent it.
+
+Decision: train and evaluate on `oral sounds`; keep `moaning` separate (91.5-100% agreement, the most solid
+class we have). `raw_label` retains kissing / mouth sounds on every row, so the split can be restored from
+human labels later without relabelling.
+
+Consequence for the generator: `[kissing]` remains a legal bracket tag, but trigger fidelity is measured at
+the `oral sounds` level until a human-labelled set shows the finer distinction is real. Claiming per-kiss
+control we cannot measure would be the kind of unsupported claim the T2A paper already made once.

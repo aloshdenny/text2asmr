@@ -22,12 +22,21 @@ from huggingface_hub import hf_hub_download
 from text2asmr.data.segment import load_alignment, split_alignment
 
 MOMMY, DADDY = "aoxo/t2a-mommy", "aoxo/t2a-daddy"
-TARGETS = ["kissing", "mouth sounds", "breathing", "moaning"]
+
+# Five independent judges (Gemini Pro, Gemini Flash, Perceptron, MiMo, Qwen3-Omni) were asked to separate
+# kissing from mouth sounds on 398 held-out clips. Mean pairwise agreement was 66.3%, with several pairs at
+# or below the 33% chance line -- the split does not carve the audio at a joint. Merging the two lifts mean
+# agreement to 82.8%, worst pair to 76.4%, and unanimity from 41% to 65%.
+#
+# This is an aggregation, not a deletion: `raw_label` on every row keeps the original distinction, so a
+# human pass can split the class back later without relabelling anything.
+MERGE = {"kissing": "oral sounds", "mouth sounds": "oral sounds"}
+TARGETS = ["oral sounds", "breathing", "moaning"]
 BG_LABELS = ["whispering", "normal speech", "silence"]
 BG = "__bg__"
 CAPTIONS = {
-    "kissing": ["kissing sounds close to the microphone", "soft wet kisses", "someone kissing the mic"],
-    "mouth sounds": ["wet mouth sounds", "licking and lip smacking", "tongue and mouth noises close to the mic"],
+    "oral sounds": ["wet mouth and kissing sounds close to the microphone", "lips, tongue and saliva sounds",
+                    "soft kisses, licking and lip smacking near the mic"],
     "breathing": ["close breathing into the microphone", "soft breaths and panting", "audible breathing, no words"],
     "moaning": ["a person moaning softly", "quiet moans and whimpers", "moaning voice close to the mic"],
     BG: ["a person talking, normal speech", "someone whispering words softly", "quiet room tone, silence"],
@@ -60,7 +69,8 @@ def load_ledgers(cache: str) -> list[dict]:
             if not src:
                 if ".m4a_" not in uid: continue
                 src = uid.rsplit(".m4a_", 1)[0] + ".m4a"
-            rows.append({"uid": uid, "label": r["label"], "source": src,
+            lab = r["label"]
+            rows.append({"uid": uid, "label": MERGE.get(lab, lab), "raw_label": lab, "source": src,
                          "creator": src.split("/")[0], "repo": repo}); n += 1
         log(f"{repo}:{name} -> {n} rows")
     return rows
@@ -208,7 +218,7 @@ def main() -> int:
         handles[r["repo"]].write(json.dumps({
             "uid": r["uid"], "label": r["target"], "text": CAPTIONS[r["target"]], "split": split,
             "source": r["source"], "start": round(g[0], 3), "duration": round(g[1], 3),
-            "creator": r["creator"], "raw_label": r["label"], "repo": r["repo"]}) + "\n")
+            "creator": r["creator"], "raw_label": r.get("raw_label", r["target"]), "repo": r["repo"]}) + "\n")
         stats[split][r["target"]] += 1; written += 1
     for h in handles.values(): h.close()
 
