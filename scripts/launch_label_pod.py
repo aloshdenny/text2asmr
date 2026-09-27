@@ -36,10 +36,7 @@ JOBS = {
     "ytmels": ("python /workspace/t2a/scripts/prep_yt_chapters.py --out /workspace/ytmels "
                "--win 4 --hop 3 --rms-db -45 --per-chapter 60 --per-class 40000 --bg-per-video 40 "
                "--eval-pct 20 --workers 12 --tmp /workspace/tmp_yt "
-               "&& tar -C /workspace -cf /workspace/ytmels.tar ytmels "
-               "&& python -c \\\"import os;from huggingface_hub import HfApi;"
-               "HfApi().upload_file(path_or_fileobj='/workspace/ytmels.tar',path_in_repo='yt_mels/ytmels.tar',"
-               "repo_id='aoxo/clap-ft-data',repo_type='dataset',commit_message='YouTube chapter mel shards')\\\"", False),
+               "&& python /workspace/t2a/scripts/push_dir_to_hf.py /workspace/ytmels aoxo/clap-ft-data yt_mels/ytmels.tar", False),
 }
 
 
