@@ -136,7 +136,8 @@ def stage_judge(a):
 
         def one(c):
             if spent[0] >= a.max_cost: return {"uid": c["uid"], "pred": None, "error": "budget"}
-            body = {"model": model, "temperature": 0, "max_tokens": 400,
+            body = {"model": model, "temperature": 0, "max_tokens": 2000 if "gemini" in model else 400,
+                    "usage": {"include": True},
                     "messages": [{"role": "user", "content": [
                         {"type": "text", "text": PROMPT},
                         {"type": "input_audio", "input_audio": {
@@ -159,10 +160,15 @@ def stage_judge(a):
                 d = json.loads(urllib.request.urlopen(req, timeout=180).read())
                 if "error" in d: return {"uid": c["uid"], "pred": None, "error": str(d["error"])[:160]}
                 u = d.get("usage") or {}
-                with lock: spent[0] += float(u.get("cost") or 0.0)
+                # BYOK calls report cost=0 and bill the provider key instead; count the upstream cost or a
+                # BYOK judge would sail straight past --max-cost
+                c_or = float(u.get("cost") or 0.0)
+                c_up = float((u.get("cost_details") or {}).get("upstream_inference_cost") or 0.0)
+                with lock: spent[0] += c_or + (c_up if u.get("is_byok") else 0.0)
                 txt = d["choices"][0]["message"].get("content") or ""
                 return {"uid": c["uid"], "pred": parse(txt), "raw": txt.strip()[:120], "gen_id": d.get("id"),
-                        "cost": u.get("cost")}
+                        "cost": u.get("cost"), "byok": u.get("is_byok"),
+                        "upstream": (u.get("cost_details") or {}).get("upstream_inference_cost")}
             except Exception as e:
                 err = getattr(e, "read", lambda: b"")()
                 return {"uid": c["uid"], "pred": None, "error": f"{type(e).__name__} {err[:160]!r}"}
