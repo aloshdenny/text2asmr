@@ -37,8 +37,10 @@ ssh "$DROPLET" 'chmod 600 /root/t2a/cookies.staged'
 
 if ssh "$DROPLET" 'cd /root/t2a && ./venv/bin/yt-dlp --cookies cookies.staged --simulate --print "%(title).30s" \
       "https://www.youtube.com/watch?v=aqz-KE-bpKQ" 2>/dev/null | grep -q .'; then
-  ssh "$DROPLET" 'mv /root/t2a/cookies.staged /root/t2a/cookies.txt && systemctl restart t2a-ytv'
-  echo "verified and installed; t2a-ytv restarted, backoff penalty cleared"
+  # no restart: the worker reads cookies.txt on every fetch, and restarting would wipe a running backoff
+  # right after YouTube throttled us -- the new session applies on the next attempt anyway
+  ssh "$DROPLET" 'mv /root/t2a/cookies.staged /root/t2a/cookies.txt'
+  echo "verified and installed; t2a-ytv picks it up on its next fetch (backoff left running)"
 else
   ssh "$DROPLET" 'rm -f /root/t2a/cookies.staged'
   echo "the exported jar does not authenticate — the existing cookies.txt was left untouched" >&2
