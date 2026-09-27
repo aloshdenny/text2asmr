@@ -49,8 +49,8 @@ if dups: print(f"WARN duplicate pod names: {sorted(dups)}")
 PY
 
 hr "Research server (RTX 4090, D:\\t2a)"
-ssh -o ConnectTimeout=20 $RS "powershell -NoProfile -Command \"nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader; 'D: free {0:N0} GB, C: free {1:N1} GB' -f ((Get-PSDrive D).Free/1GB), ((Get-PSDrive C).Free/1GB); Get-ChildItem D:\t2a\jobs\*.pid -ErrorAction SilentlyContinue | ForEach-Object { \$n=\$_.BaseName; \$alive=[bool](Get-Process -Id (Get-Content \$_) -ErrorAction SilentlyContinue); \$log='D:\t2a\logs\' + \$n + '.log'; \$last=(Get-Content \$log -Tail 1 -ErrorAction SilentlyContinue); '{0} job {1}: {2}' -f (\$(if(\$alive){'OK  '}else{'DONE'})), \$n, \$last }\"" 2>&1 > /tmp/.t2a_rs.$$ 2>&1 && tr -d '\000' < /tmp/.t2a_rs.$$ | grep -vE "^\s*$" | cut -c1-200 || echo "FAIL research server unreachable"
-rm -f /tmp/.t2a_rs.$$
+ssh -o ConnectTimeout=20 $RS "powershell -NoProfile -ExecutionPolicy Bypass -File D:\\t2a\\status.ps1" 2>/dev/null | tr -d '\000' | grep -vE "^\s*$" | cut -c1-200
+[ "${PIPESTATUS[0]}" = 0 ] || echo "FAIL research server unreachable"
 
 hr "Hub artefacts"
 python3 - <<'PY' 2>&1 || echo "FAIL hub"
