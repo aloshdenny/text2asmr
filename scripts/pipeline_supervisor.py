@@ -81,7 +81,7 @@ def main() -> int:
     a = ap.parse_args()
     key = os.environ["RUNPOD_API_KEY"]
     cycle = 0; counts: dict = {}
-    next_side = "mommy"
+    launched_at: dict[str, float] = {}; cooldown: dict[str, float] = {}
 
     while True:
         cycle += 1
@@ -94,13 +94,23 @@ def main() -> int:
         bal = m.get("clientBalance") or 0.0
         log(f"balance ${bal:.2f} | live labeling pods {len(live)}/{a.pods}")
 
-        missing = a.pods - len(live)
+        # one pod per corpus, never two on the same shard: strict alternation once launched a second daddy
+        # pod next to a live one after the mommy queue drained, and both labelled the identical shard.
+        now = time.time()
+        live_sides = {(p.get("name") or "").split("-")[2] for p in live if len((p.get("name") or "").split("-")) > 2}
+        for side, t0 in list(launched_at.items()):
+            if side not in live_sides:
+                if now - t0 < 45 * 60:                  # died fast = nothing left to label on that side
+                    cooldown[side] = now + 6 * 3600
+                    log(f"  {side} pod exited {(now - t0) / 60:.0f} min after launch; queue looks drained, cooling down 6 h")
+                del launched_at[side]
+        free = [sd for sd in ("mommy", "daddy") if sd not in live_sides and cooldown.get(sd, 0) < now]
+        missing = min(a.pods - len(live), len(free))
         if missing > 0 and bal > a.balance_floor:
-            for _ in range(missing):
-                side = next_side
-                next_side = "daddy" if side == "mommy" else "mommy"
+            for side in free[:missing]:
                 if not launch(side, a.budget_h, a.repo_dir, a.python):
                     log("  no GPU type available right now; will retry next cycle"); break
+                launched_at[side] = time.time()
                 time.sleep(20)
         elif missing > 0:
             log(f"  not launching: balance ${bal:.2f} is at or below the ${a.balance_floor} floor")
