@@ -11,12 +11,20 @@ def main():
         j = json.loads(Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).read_text()); return kick(j["host"], j["port"], repo, shards, idx, workers)
     pod = None
     for name in os.environ.get("T2A_PREFS", "RTX 4090,RTX A5000,RTX A6000,L40S").split(","):
-        for cloud in ("SECURE", "COMMUNITY"):
+        for cloud in os.environ.get("T2A_CLOUDS", "SECURE,COMMUNITY").split(","):
             try: pod = L.create(key, token, pub, L.gpu_id(key, name), name, cloud); print("created", cloud, name, pod, flush=True); break
             except Exception as e: print(f"{cloud} {name}: {str(e)[:80]}")
         if pod: break
     if not pod: raise SystemExit("no GPU")
-    host, port = L.wait_ssh(key, pod["id"]); print("SSH", host, port, flush=True)
+    try:
+        host, port = L.wait_ssh(key, pod["id"]); print("SSH", host, port, flush=True)
+    except TimeoutError:
+        # a pod nobody can reach still bills; never leave one behind (community hosts can lack a public IP)
+        import urllib.request
+        urllib.request.urlopen(urllib.request.Request(f"https://api.runpod.io/graphql?api_key={key}",
+            data=json.dumps({"query": f'mutation{{podTerminate(input:{{podId:"{pod["id"]}"}})}}'}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "t2a/1.0"}), timeout=60)
+        raise SystemExit(f"no ssh on {pod['id']}; terminated it")
     Path(os.environ.get("T2A_POD_FILE", "/tmp/t2a_transcribe_pod.json")).write_text(json.dumps({"id": pod["id"], "host": host, "port": port}))
     kick(host, port, repo, shards, idx, workers)
 
