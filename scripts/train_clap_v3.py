@@ -63,7 +63,9 @@ def main():
 
     by_class = defaultdict(list)
     for r in pos: by_class[r["label"]].append(r)
-    cls_list = list(by_class); w = np.array([len(by_class[c]) for c in cls_list], dtype=np.float64) ** 0.5; w /= w.sum()
+    # class sampling by sqrt of *effective* size: 10k rows at w=0.3 is ~3k clean rows' worth of signal
+    cls_list = list(by_class); w = np.array([sum(r.get("w", 1.0) for r in by_class[c]) for c in cls_list], dtype=np.float64) ** 0.5; w /= w.sum()
+    log("effective rows per class: " + ", ".join(f"{c}={sum(r.get('w', 1.0) for r in by_class[c]):.0f}/{len(by_class[c])}" for c in cls_list))
     n_bg = int(a.batch * a.bg_frac); n_pos = a.batch - n_bg
     cw = torch.ones(len(classes) + 1, device=dev); cw[-1] = 0.5   # bg is over-represented per batch; damp it
     q: Queue = Queue(maxsize=6); stop = threading.Event()
@@ -73,7 +75,13 @@ def main():
             picks = []
             for i in np.random.choice(len(cls_list), n_pos, p=w):
                 rs = by_class[cls_list[i]]; r = rs[rng.randrange(len(rs))]
-                if r.get("pseudo") and rng.random() > a.pseudo_weight: r = rs[rng.randrange(len(rs))]
+                # weak supervision at scale: every row carries w = measured precision of its (source, class)
+                # cell. A row is kept with probability w, so a 55%-precise source counts about half as much as
+                # a clean one without being thrown away. Pseudo rows keep their old knob on top.
+                for _ in range(8):
+                    keep = r.get("w", 1.0) * (a.pseudo_weight if r.get("pseudo") else 1.0)
+                    if rng.random() <= keep: break
+                    r = rs[rng.randrange(len(rs))]
                 picks.append(r)
             bpicks = [bg[rng.randrange(len(bg))] for _ in range(n_bg)] if bg else []
             feats = [store.get(r).astype(np.float32) for r in picks + bpicks]
@@ -108,7 +116,10 @@ def main():
                 e = model.get_audio_features(input_features=x, is_longer=torch.zeros(len(ch), 1, dtype=torch.bool, device=dev))
             outs.append(torch.nn.functional.normalize(e.float(), dim=-1))
         return torch.cat(outs)
-    BG_TEXTS = ["a person talking, normal speech", "someone whispering words softly", "quiet room tone, silence", "moaning voice", "spoken conversation"]
+    # background prompts must never describe a target class: conf = best class - best background, so a
+    # "moaning voice" prompt here docked every real moaning clip's confidence once moaning became a class
+    BG_TEXTS = [t for t in ["a person talking, normal speech", "someone whispering words softly", "quiet room tone, silence",
+                            "moaning voice", "spoken conversation"] if not any(c in t for c in classes)]
     @torch.no_grad()
     def bg_emb():
         t = proc(text=BG_TEXTS, return_tensors="pt", padding=True).to(dev)
