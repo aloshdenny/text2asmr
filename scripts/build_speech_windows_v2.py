@@ -35,6 +35,17 @@ SPEECHY = {"whispering", "normal speech"}
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 
+_pace_lock = __import__("threading").Lock(); _pace_next = [0.0]
+PACE_S = 0.25                                           # one Hub file every 0.25 s across all threads
+
+
+def pace():
+    with _pace_lock:
+        now = time.time(); wait = _pace_next[0] - now
+        _pace_next[0] = max(now, _pace_next[0]) + PACE_S
+    if wait > 0: time.sleep(wait)
+
+
 def load_labels(repo: str) -> dict[str, dict[int, str]]:
     """source -> {gap start ms: label}, from every Qwen3-Omni ledger in the repo."""
     from huggingface_hub import HfApi, hf_hub_download
@@ -114,7 +125,7 @@ def main() -> int:
     ap.add_argument("--max-words", type=int, default=55)
     ap.add_argument("--max-repeat", type=int, default=3, help="drop windows with a word repeated more than this in a row")
     ap.add_argument("--limit-files", type=int, default=0, help="debug: stop after N recordings per repo")
-    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     from huggingface_hub import HfApi, hf_hub_download
@@ -132,12 +143,22 @@ def main() -> int:
         got_s, per_creator = 0.0, Counter()
 
         def fetch(f):
-            try: return f, json.load(open(hf_hub_download(repo, f, repo_type="dataset")))
-            except Exception: return f, None
+            # The Hub allows 5,000 resolves per 5 min for the whole account, shared with the label pods and the
+            # droplet. Unpaced, 16 threads blew through it in two minutes and every failure was silently
+            # counted as an empty alignment. Pace, retry 429s, and report failures separately.
+            for i in range(7):
+                pace()
+                try: return f, json.load(open(hf_hub_download(repo, f, repo_type="dataset")))
+                except Exception as e:
+                    if "429" in str(e) or "Too Many Requests" in str(e) or "LocalEntryNotFound" in type(e).__name__:
+                        time.sleep(min(300, 20 * 2 ** i)); continue
+                    return f, "error"
+            return f, "error"
         with ThreadPoolExecutor(a.workers) as ex:
             for f, align in ex.map(fetch, files):
                 if got_s >= per_repo_s: break
                 src = f[:-len(".json")]; creator = src.split("/")[0]
+                if align == "error": stats["fetch failed"] += 1; continue
                 if not align: stats["empty alignment"] += 1; continue
                 if per_creator[creator] >= a.creator_cap_h * 3600: stats["creator cap"] += 1; continue
                 for w in windows_for(src, align, labels.get(src, {}), a, rng):
