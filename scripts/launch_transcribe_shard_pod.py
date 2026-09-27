@@ -48,7 +48,7 @@ PY
     echo "[\\$(date +%T)] expansion pass done, sleeping 10 min"; sleep 600
   done
 else
-  while true; do python scripts/transcribe_audios2.py --repo {repo} --model large-v3 --compute-type float16 --transcribe-workers {workers} --producer-workers {workers} --upload-batch-size 64 --upload-batch-timeout 1500 --num-shards {shards} --shard-index {idx}; echo "[\\$(date +%T)] exited rc=\\$?, restarting in 60s"; sleep 60; done
+  while true; do python scripts/transcribe_audios2.py --repo {repo} --model large-v3 --compute-type float16 --transcribe-workers {workers} --producer-workers {workers} --upload-batch-size 64 --upload-batch-timeout 1500 --num-shards {shards} --shard-index {idx} {os.environ.get("T2A_EXTRA", "")}; echo "[\\$(date +%T)] exited rc=\\$?, restarting in 60s"; sleep 60; done
 fi
 EOF2
 chmod +x /workspace/run_transcribe.sh

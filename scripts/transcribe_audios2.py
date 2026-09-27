@@ -341,6 +341,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=REPO_ID,
                     help="HF dataset repo to transcribe (default aoxo/t2a-mommy)")
+    ap.add_argument("--ext", default=".m4a",
+                    help="comma-separated audio extensions to transcribe (the YouTube repo stores .flac)")
     ap.add_argument("--model", default="medium",
                     help="faster-whisper model size; medium fits ~1-2GB VRAM, "
                         "large-v3 wants a real GPU (~3GB+ per instance)")
@@ -426,7 +428,7 @@ def main() -> int:
     api = hf_api()
     all_files = api.list_repo_files(REPO_ID, repo_type="dataset")
     all_set = set(all_files)
-    audio_files = [f for f in all_files if f.lower().endswith(".m4a")]
+    audio_files = [f for f in all_files if f.lower().endswith(tuple(args.ext.split(",")))]
     todo = [f for f in audio_files if f + ".json" not in all_set]
     log(f"{len(audio_files)} audio files total, {len(audio_files) - len(todo)} "
         f"already transcribed (per existing .json on the Hub), {len(todo)} remaining")
