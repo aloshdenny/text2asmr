@@ -86,6 +86,37 @@ def stage_cut(a):
     log(f"{len(clips)} clips -> {a.work / 'clips.json'}")
 
 
+def stage_cutext(a):
+    """Calibration: the same judges on human-labelled FSD50K / ESC-50 clips. If a judge cannot find tapping
+    in a clip a person labelled 'tap', its verdict on a YouTube chapter says nothing about the chapter."""
+    from huggingface_hub import hf_hub_download
+    rows = [json.loads(l) for l in open(hf_hub_download("aoxo/t2a-eval-external", "external_eval_manifest.jsonl",
+                                                        repo_type="dataset"))]
+    rng = random.Random(a.seed); rng.shuffle(rows)
+    per, sel = Counter(), []
+    for r in rows:
+        c = r.get("t2a_class")
+        if c in CLASSES and not r.get("proxy") and per[c] < a.per_class:
+            per[c] += 1; sel.append(r)
+    log("external sample: " + ", ".join(f"{c}={n}" for c, n in per.items()))
+    wav_dir = a.work / "wav"; wav_dir.mkdir(parents=True, exist_ok=True)
+
+    def cut(r):
+        w = wav_dir / (safe_name(r["uid"]) + ".wav")
+        if not w.exists():
+            tmp = w.with_suffix(".part.wav")
+            p = subprocess.run(["ffmpeg", "-v", "error", "-y", "-t", "4", "-i", r["url"], "-ac", "1", "-ar", "16000",
+                                str(tmp)], capture_output=True, text=True)
+            if p.returncode or not tmp.exists() or tmp.stat().st_size < 1000:
+                return None
+            tmp.rename(w)
+        return {"uid": r["uid"], "label": r["t2a_class"], "source": r["source"], "wav": str(w)}
+    with ThreadPoolExecutor(max_workers=a.concurrency) as ex:
+        clips = [c for c in ex.map(cut, sel) if c]
+    (a.work / "clips.json").write_text(json.dumps(clips))
+    log(f"{len(clips)} external clips -> {a.work / 'clips.json'}")
+
+
 def stage_judge(a):
     clips = json.loads((a.work / "clips.json").read_text())
     key = os.environ["OPENROUTER_API_KEY_GS"]
@@ -111,6 +142,15 @@ def stage_judge(a):
                         {"type": "input_audio", "input_audio": {
                             "data": base64.b64encode(open(c["wav"], "rb").read()).decode(), "format": "wav"}}]}],
                     "provider": {"allow_fallbacks": True}}
+            for attempt in range(6):
+                r = call(c, body)
+                if r.get("error") and any(f"'code':{x}" in r["error"].replace(" ", "") or f"code\":{x}" in r["error"]
+                                          for x in (429, 500, 502, 503, 520, 529)):
+                    time.sleep(min(60, 4 * 2 ** attempt) + random.random()); continue
+                return r
+            return r
+
+        def call(c, body):
             try:
                 req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions",
                     data=json.dumps(body).encode(),
@@ -183,13 +223,13 @@ def main() -> int:
     ap.add_argument("--per-class", type=int, default=40)
     ap.add_argument("--per-video", type=int, default=2)
     ap.add_argument("--max-cost", type=float, default=1.5, help="USD cap per judge")
-    ap.add_argument("--concurrency", type=int, default=8)
+    ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--seed", type=int, default=7)
     a = ap.parse_args()
     a.judges = [j for j in a.judges.split(",") if j]
     a.work.mkdir(parents=True, exist_ok=True)
     for s in a.stage.split(","):
-        {"cut": stage_cut, "judge": stage_judge, "report": stage_report}[s](a)
+        {"cut": stage_cut, "cutext": stage_cutext, "judge": stage_judge, "report": stage_report}[s](a)
     return 0
 
 
