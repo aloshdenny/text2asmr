@@ -60,30 +60,26 @@ def stage_cut(a):
     del rows, picked                                    # the droplet has 1 GB; 69k dicts is most of it
 
     wav_dir = a.work / "wav"; wav_dir.mkdir(parents=True, exist_ok=True)
-    by_src = defaultdict(list)
-    for r in sel: by_src[(r["repo"], r["source"])].append(r)
+    # ffmpeg seeks the remote FLAC with HTTP range requests: ~19 s per clip but no download, no disk and
+    # ~20 MB RAM, so 8 in parallel beats fetching whole 200 MB sources to keep two 4 s windows from each.
+    def cut(r):
+        w = wav_dir / (safe_name(r["uid"]) + ".wav")
+        if not w.exists():
+            url = f"https://huggingface.co/datasets/{r['repo']}/resolve/main/audio/{r['source'].split(':', 1)[1]}.flac"
+            tmp = w.with_suffix(".part.wav")
+            p = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{r['start']:.3f}", "-t", f"{r['dur']:.3f}",
+                                "-i", url, "-ac", "1", "-ar", "16000", str(tmp)], capture_output=True, text=True)
+            if p.returncode or not tmp.exists() or tmp.stat().st_size < 1000:
+                return None, f"{r['uid']}: {p.stderr.strip()[:100]}"
+            tmp.rename(w)                               # atomic: a killed run never leaves a truncated clip
+        return {"uid": r["uid"], "label": r["label"], "source": r["source"], "chapter": r.get("chapter"),
+                "wav": str(w)}, None
     clips = []
-    for i, ((repo, src), rs) in enumerate(by_src.items()):
-        vid = src.split(":", 1)[1]
-        need = [r for r in rs if not (wav_dir / (safe_name(r["uid"]) + ".wav")).exists()]
-        local = None
-        try:
-            if need:
-                local = hf_hub_download(repo, f"audio/{vid}.flac", repo_type="dataset", cache_dir=str(a.work / "cache"))
-            for r in rs:
-                w = wav_dir / (safe_name(r["uid"]) + ".wav")
-                if not w.exists():
-                    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{r['start']:.3f}", "-t", f"{r['dur']:.3f}",
-                                    "-i", local, "-ac", "1", "-ar", "16000", str(w)], check=True)
-                clips.append({"uid": r["uid"], "label": r["label"], "source": src, "chapter": r.get("chapter"),
-                              "wav": str(w)})
-        except Exception as e:
-            log(f"  {src}: {type(e).__name__} {str(e)[:80]}")
-        finally:
-            if local:                                   # droplet disk is small: never keep a source around
-                try: os.remove(os.path.realpath(local))
-                except OSError: pass
-        if i % 20 == 0: log(f"  cut {i}/{len(by_src)} sources, {len(clips)} clips")
+    with ThreadPoolExecutor(max_workers=a.concurrency) as ex:
+        for i, (c, err) in enumerate(ex.map(cut, sel)):
+            if c: clips.append(c)
+            if err: log(f"  skip {err}")
+            if i % 40 == 0: log(f"  cut {i}/{len(sel)} clips, {len(clips)} ok")
     (a.work / "clips.json").write_text(json.dumps(clips))
     log(f"{len(clips)} clips -> {a.work / 'clips.json'}")
 
