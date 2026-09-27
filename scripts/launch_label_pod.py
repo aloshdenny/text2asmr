@@ -58,9 +58,9 @@ def bootstrap(repo_key: str, budget_h: float, shard: int, n_shards: int, concurr
         f"(test -d /workspace/t2a || git clone --depth 1 {GIT} /workspace/t2a)",
         "cd /workspace/t2a && git pull -q || true",
         "export PYTHONPATH=/workspace/t2a HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 T2A_DIR=/workspace/t2a VLLM_USE_FLASHINFER_SAMPLER=0",
-        "(" + tail.format(repo_key=repo_key, budget_h=budget_h, shard=shard, n_shards=n_shards,
-                          concurrency=concurrency) + " 2>&1 | tee /workspace/job.log; "
-        "runpodctl stop pod $RUNPOD_POD_ID || true)",
+        "((" + tail.format(repo_key=repo_key, budget_h=budget_h, shard=shard, n_shards=n_shards,
+                          concurrency=concurrency) + " 2>&1 | tee /workspace/job.log) "
+        "&& runpodctl stop pod $RUNPOD_POD_ID || echo T2A_JOB_FAILED_KEEPING_POD_ALIVE)",
     ]
     return " && ".join(steps)
 
