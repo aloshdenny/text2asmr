@@ -37,6 +37,8 @@ def main():
     # A pod is ephemeral: fp16 mel shards for 240 chapter-hours are ~37 GB and would die with it. In
     # manifest mode the pod does the expensive part (decode + loudness gate + chapter mapping) and emits a
     # few MB of window geometry, which any later run can cut mels from.
+    ap.add_argument("--per-single", type=int, default=200, help="windows per verified single-trigger video")
+    ap.add_argument("--single-blocks", type=int, default=6, help="300 s blocks sampled across a single-trigger video")
     ap.add_argument("--manifest-only", action="store_true", help="emit window rows, skip mel shards (no GPU needed)")
     ap.add_argument("--push-to", default="", help="HF dataset repo to upload the manifest to")
     ap.add_argument("--push-path", default="yt_windows/windows.jsonl")
@@ -44,13 +46,31 @@ def main():
     from huggingface_hub import HfApi, hf_hub_download
     api = HfApi(); files = api.list_repo_files(a.repo, repo_type="dataset")
     metas = [f for f in files if f.startswith("meta/")]; audios = {f.split("/")[-1][:-5] for f in files if f.startswith("audio/")}
+    label_files = {f for f in files if f.startswith("labels/video/")}; vad_files = {f for f in files if f.startswith("vad/")}
     vids = []
     for f in metas:
         vid = f.split("/")[-1].replace(".info.json", "")
         if vid not in audios: continue
         info = json.load(open(hf_hub_download(a.repo, f, repo_type="dataset")))
         chs = [{"start": c.get("start_time"), "end": c.get("end_time"), "cls": classify(c.get("title")), "title": c.get("title")} for c in (info.get("chapters") or [])]
-        vids.append({"id": vid, "channel": info.get("channel") or info.get("uploader"), "chapters": [c for c in chs if c["cls"] and c["end"] and c["start"] is not None]})
+        kind, speech = "legacy", []
+        if f"labels/video/{vid}.json" in label_files:
+            # discovery + droplet verification: a video-level label outranks the chapter keyword map
+            lab = json.load(open(hf_hub_download(a.repo, f"labels/video/{vid}.json", repo_type="dataset")))
+            kind, dur = lab["kind"], float(lab.get("duration_s") or info.get("duration") or 0)
+            if kind == "chapter":
+                chs = [{"start": c["start"], "end": c["end"], "cls": lab["cls"], "title": c.get("title")} for c in lab["chapters"]]
+            else:
+                # several blocks spread across the video, so a class is not all minute one of each upload
+                lo, hi = min(60.0, dur * 0.05), max(dur - 60.0, dur * 0.95)
+                nb = int(max(1, min(a.single_blocks, (hi - lo) // 300)))
+                step = (hi - lo) / nb
+                chs = [{"start": lo + i * step, "end": min(hi, lo + i * step + 300.0), "cls": lab["cls"],
+                        "title": f"[single] {lab['cls']}"} for i in range(nb)]
+        if f"vad/{vid}.json" in vad_files:
+            speech = json.load(open(hf_hub_download(a.repo, f"vad/{vid}.json", repo_type="dataset")))["speech"]
+        vids.append({"id": vid, "channel": info.get("channel") or info.get("uploader"), "kind": kind, "speech": speech,
+                     "chapters": [c for c in chs if c["cls"] and c["end"] and c["start"] is not None]})
     log(f"videos with audio+meta: {len(vids)}; labeled chapters: {sum(len(v['chapters']) for v in vids)}; class chapters: {Counter(c['cls'] for v in vids for c in v['chapters']).most_common()}")
     gm = None if a.manifest_only else GpuMel()
     w = None if a.manifest_only else ShardWriter(a.out, 4000)
@@ -75,16 +95,20 @@ def main():
                 if dur < a.win: continue
                 wav = decode_span(local, c["start"], min(dur, 900.0)); n = int((len(wav) / SR - a.win) / a.hop) + 1
                 idx = list(range(max(0, n)));
-                if len(idx) > (a.per_chapter if c["cls"] != BG else a.bg_per_video): idx = sorted(rng.choice(idx, a.per_chapter if c["cls"] != BG else a.bg_per_video, replace=False).tolist())
+                cap = a.bg_per_video if c["cls"] == BG else (a.per_single // max(1, len(v["chapters"])) if v["kind"] == "single" else a.per_chapter)
+                if len(idx) > cap: idx = sorted(rng.choice(idx, cap, replace=False).tolist())
                 for k in idx:
                     seg = wav[int(k * a.hop * SR): int(k * a.hop * SR + a.win * SR)]
                     if len(seg) < SR: continue
+                    t0 = c["start"] + k * a.hop
+                    # the droplet's VAD map: a trigger window that overlaps speech is not a clean trigger
+                    if c["cls"] != BG and any(s0 < t0 + a.win and t0 < s1 for s0, s1 in v["speech"]): continue
                     db = 20 * np.log10(np.sqrt(np.mean(seg ** 2)) + 1e-9)
                     if db < a.rms_db: continue
                     meta = {"uid": f"yt:{v['id']}:{c['start'] + k * a.hop:.1f}", "label": c["cls"],
                             "text": TEXTS.get(c["cls"], []), "split": split, "source": f"yt:{v['id']}",
                             "chapter": c["title"], "rms_db": round(float(db), 1),
-                            "start": round(c["start"] + k * a.hop, 3), "dur": a.win, "repo": a.repo}
+                            "start": round(c["start"] + k * a.hop, 3), "dur": a.win, "repo": a.repo, "kind": v["kind"]}
                     out.append((None if a.manifest_only else repeatpad(seg), meta))
             return v["id"], out
         except Exception as e: log(f"video fail {v['id']}: {type(e).__name__}: {str(e)[:120]}"); return v["id"], []
