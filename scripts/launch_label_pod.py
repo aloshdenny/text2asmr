@@ -40,6 +40,8 @@ JOBS = {
     # Whisper large-v3 over the YouTube repo: one pass over everything without a transcript, then the pod
     # stops itself. transcribe_audios2 skips mostly-non-speech files with an empty marker, so the no-talking
     # trigger videos cost seconds each. No double quotes here: the whole bootstrap is one quoted string.
+    # CLAP v7 stage 2 entirely from the Hub (tinkerspace is no longer part of the pipeline)
+    "v7s2": ("bash /workspace/t2a/scripts/pod_train_v7s2.sh", False),
     "whisper": ("pip install -q faster-whisper nvidia-cudnn-cu12 nvidia-cublas-cu12 && "
                 "export LD_LIBRARY_PATH=$(python -c 'import nvidia.cublas.lib as a, nvidia.cudnn.lib as b; "
                 "print(a.__path__[0], b.__path__[0], sep=chr(58))'):$LD_LIBRARY_PATH && "
