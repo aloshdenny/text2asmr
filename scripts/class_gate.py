@@ -44,6 +44,7 @@ def parse(t: str) -> str | None:
 
 
 def stage_cut(a):
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")   # xet buffers whole files in RAM -> OOM on 1 GB
     from huggingface_hub import hf_hub_download
     rows = [json.loads(l) for l in open(hf_hub_download("aoxo/clap-ft-data", "yt_windows/windows.jsonl",
                                                         repo_type="dataset"))]
@@ -55,6 +56,7 @@ def stage_cut(a):
         if c in CLASSES and len(picked[c]) < a.per_class and per_vid[(c, r["source"])] < a.per_video:
             picked[c].append(r); per_vid[(c, r["source"])] += 1
     sel = [r for c in CLASSES for r in picked[c]]
+    del rows, picked                                    # the droplet has 1 GB; 69k dicts is most of it
     log("sampled: " + ", ".join(f"{c}={len(picked[c])}" for c in CLASSES))
 
     wav_dir = a.work / "wav"; wav_dir.mkdir(parents=True, exist_ok=True)

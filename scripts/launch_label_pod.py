@@ -41,28 +41,34 @@ JOBS = {
 
 
 def bootstrap(repo_key: str, budget_h: float, shard: int, n_shards: int, concurrency: int, job: str = "label") -> str:
-    """One shell command; it must be idempotent because RunPod re-runs it if the container restarts."""
+    """One shell command. Design rules learned the hard way:
+    * sshd starts FIRST and unconditionally -- if the pod dies before sshd, its log is unreadable.
+    * setup uses ';' not '&&' so one failed step cannot exit the container's main process (which makes
+      RunPod reap the pod before anyone can look).
+    * the container NEVER exits on its own: it self-stops only when the job succeeds, else sleeps so the
+      guard reaps it at the never-worked deadline and the log survives for inspection.
+    """
     tail, need_vllm = JOBS[job]
-    steps = [
-        "set -x",
-        "(bash /start.sh > /workspace/start.log 2>&1 &) || service ssh start || true",   # keep sshd: logs matter
-        "nvidia-smi",
-        "apt-get update -qq && apt-get install -y -qq ffmpeg git ninja-build",
-        "pip install -q --no-input uv numpy 'huggingface_hub>=0.25' soundfile transformers",
-    ]
-    if need_vllm:
-        steps.append("uv pip install --system --index-strategy unsafe-best-match "
-                     "'https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl' "
-                     "--extra-index-url https://download.pytorch.org/whl/cu129 qwen-omni-utils soundfile 'huggingface_hub>=0.25' ninja")
-    steps += [
-        f"(test -d /workspace/t2a || git clone --depth 1 {GIT} /workspace/t2a)",
-        "cd /workspace/t2a && git pull -q || true",
-        "export PYTHONPATH=/workspace/t2a HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 T2A_DIR=/workspace/t2a VLLM_USE_FLASHINFER_SAMPLER=0",
-        "((" + tail.format(repo_key=repo_key, budget_h=budget_h, shard=shard, n_shards=n_shards,
-                          concurrency=concurrency) + " 2>&1 | tee /workspace/job.log) "
-        "&& runpodctl stop pod $RUNPOD_POD_ID || echo T2A_JOB_FAILED_KEEPING_POD_ALIVE)",
-    ]
-    return " && ".join(steps)
+    vllm = ("uv pip install --system --index-strategy unsafe-best-match "
+            "'https://github.com/vllm-project/vllm/releases/download/v0.29.0/vllm-0.29.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl' "
+            "--extra-index-url https://download.pytorch.org/whl/cu129 qwen-omni-utils soundfile 'huggingface_hub>=0.25' ninja ; ") if need_vllm else ""
+    job_cmd = tail.format(repo_key=repo_key, budget_h=budget_h, shard=shard, n_shards=n_shards, concurrency=concurrency)
+    body = (
+        "set -x ; "
+        "( bash /start.sh > /workspace/start.log 2>&1 & ) ; service ssh start 2>/dev/null ; "     # sshd first, both ways
+        "nvidia-smi ; "
+        "apt-get update -qq ; apt-get install -y -qq ffmpeg git ninja-build ; "
+        "pip install -q --no-input uv numpy 'huggingface_hub>=0.25' soundfile transformers ; "
+        + vllm +
+        f"( test -d /workspace/t2a || git clone --depth 1 {GIT} /workspace/t2a ) ; "
+        "cd /workspace/t2a ; git pull -q || true ; "
+        "export PYTHONPATH=/workspace/t2a HF_HUB_DISABLE_XET=1 PYTHONUNBUFFERED=1 T2A_DIR=/workspace/t2a VLLM_USE_FLASHINFER_SAMPLER=0 ; "
+        f"( {job_cmd} ) 2>&1 | tee /workspace/job.log ; "
+        "rc=${PIPESTATUS[0]} ; echo T2A_JOB_RC=$rc ; "
+        "if [ \"$rc\" = 0 ]; then runpodctl stop pod $RUNPOD_POD_ID ; "
+        "else echo T2A_JOB_FAILED_KEEPING_POD_ALIVE ; sleep 86400 ; fi"
+    )
+    return body
 
 
 def main() -> int:
