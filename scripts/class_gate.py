@@ -27,7 +27,9 @@ from text2asmr.io_guard import JsonlSink, preflight, safe_name
 
 CLASSES = ["tapping", "brushing", "scratching", "liquid", "microphone touching", "crinkling", "sticky",
            "fabric rustling", "paper rustling", "hand movements", "cutting", "typing", "writing", "page turning"]
-JUDGES = ["xiaomi/mimo-v2.6-flash", "perceptron/perceptron-mk1.5", "qwen/qwen3.8-omni-flash"]
+# three families that bill credits on this key; qwen is excluded by the org's provider privacy setting,
+# openai routes through a dead BYOK key and meta is blocked by org guardrails (all need the dashboard)
+JUDGES = ["xiaomi/mimo-v2.6-pro", "perceptron/perceptron-mk1.5", "mistralai/voxtral-small-24b-2507"]
 PROMPT = ("This is a 4-second clip from an ASMR video. Which ONE of these sounds is it mainly? "
           + "; ".join(CLASSES) + "; none of these. Answer with the label only, nothing else.")
 
