@@ -111,7 +111,7 @@ def main() -> int:
     if a.dry_run:
         print(mutation[:1200]); return 0
     pod = gql(mutation, key)["podFindAndDeployOnDemand"]
-    print(f"launched {pod['name']} id={pod['id']} ${pod['costPerHr']}/h")
+    print(f"LAUNCH_OK {pod['name']} id={pod['id']} ${pod['costPerHr']}/h")
     print("watch:  ssh root@139.59.33.163 'tail -f /root/t2a/runpod_guard.log'")
     return 0
 
