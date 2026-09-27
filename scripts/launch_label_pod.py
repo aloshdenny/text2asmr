@@ -37,6 +37,15 @@ JOBS = {
                "--win 4 --hop 3 --rms-db -45 --per-chapter 60 --per-class 40000 --bg-per-video 40 "
                "--eval-pct 20 --workers 12 --tmp /workspace/tmp_yt "
                "&& python /workspace/t2a/scripts/push_dir_to_hf.py /workspace/ytmels aoxo/clap-ft-data yt_mels/ytmels.tar", False),
+    # Whisper large-v3 over the YouTube repo: one pass over everything without a transcript, then the pod
+    # stops itself. transcribe_audios2 skips mostly-non-speech files with an empty marker, so the no-talking
+    # trigger videos cost seconds each. No double quotes here: the whole bootstrap is one quoted string.
+    "whisper": ("pip install -q faster-whisper nvidia-cudnn-cu12 nvidia-cublas-cu12 && "
+                "export LD_LIBRARY_PATH=$(python -c 'import nvidia.cublas.lib as a, nvidia.cudnn.lib as b; "
+                "print(a.__path__[0], b.__path__[0], sep=chr(58))'):$LD_LIBRARY_PATH && "
+                "python /workspace/t2a/scripts/transcribe_audios2.py --repo aoxo/asmr-yt-chapters --ext .flac "
+                "--model large-v3 --compute-type float16 --transcribe-workers 3 --producer-workers 3 "
+                "--upload-batch-size 64 --upload-batch-timeout 600", False),
 }
 
 
