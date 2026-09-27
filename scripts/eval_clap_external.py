@@ -36,6 +36,7 @@ def fetch(row, tmp: Path):
     p = tmp / (row["uid"].replace("/", "_") + ".wav")
     try:
         if not p.exists():
+            time.sleep(0.4)                             # shared Hub quota: 8 threads at 0.4 s ~ 20 files/s peak, bursts only
             req = urllib.request.Request(row["url"], headers={"User-Agent": "t2a-eval/1.0",
                                                               **({"Authorization": f"Bearer {os.environ['HF_TOKEN']}"} if "huggingface.co" in row["url"] and os.environ.get("HF_TOKEN") else {})})
             p.write_bytes(urllib.request.urlopen(req, timeout=120).read())
@@ -67,7 +68,7 @@ def main() -> int:
         for (r, _), p in zip(buf, probs):
             preds[r["t2a_class"]][classes[int(p.argmax())]] += 1
 
-    with ThreadPoolExecutor(8) as ex:
+    with ThreadPoolExecutor(3) as ex:
         for r, w in ex.map(lambda r: fetch(r, tmp), rows):
             if w is None: n_fail += 1; continue
             buf.append((r, w))
