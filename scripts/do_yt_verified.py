@@ -122,7 +122,11 @@ def main() -> int:
         log(f"{len(todo)} to fetch ({sum(c['kind'] != 'legacy' for c in todo)} discovered, "
             f"{sum(c['kind'] == 'legacy' for c in todo)} legacy); {per_hour}/h")
 
+        cand_mtime = a.candidates.stat().st_mtime if a.candidates.exists() else 0
         for c in todo:
+            # discovery keeps merging new candidates; they outrank the legacy queue, so re-plan when they land
+            if (a.candidates.stat().st_mtime if a.candidates.exists() else 0) != cand_mtime:
+                log("candidate list changed; re-planning"); break
             if shutil.disk_usage("/").free / 1e9 < a.min_free_gb:
                 log("low disk; pausing 30 min"); time.sleep(1800); break
             now = time.time(); recent[:] = [t for t in recent if now - t < 3600]
