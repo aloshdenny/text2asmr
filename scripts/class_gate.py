@@ -56,8 +56,8 @@ def stage_cut(a):
         if c in CLASSES and len(picked[c]) < a.per_class and per_vid[(c, r["source"])] < a.per_video:
             picked[c].append(r); per_vid[(c, r["source"])] += 1
     sel = [r for c in CLASSES for r in picked[c]]
-    del rows, picked                                    # the droplet has 1 GB; 69k dicts is most of it
     log("sampled: " + ", ".join(f"{c}={len(picked[c])}" for c in CLASSES))
+    del rows, picked                                    # the droplet has 1 GB; 69k dicts is most of it
 
     wav_dir = a.work / "wav"; wav_dir.mkdir(parents=True, exist_ok=True)
     by_src = defaultdict(list)
