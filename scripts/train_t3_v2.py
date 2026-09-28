@@ -7,7 +7,7 @@ What is new versus the v1 baseline (train_speech.py):
   * continuation: the 4 s of the same recording before each window goes in as the speech prompt
     (cond_prompt_speech_tokens -> perceiver). At inference a long script is generated as chained <= 20 s
     windows, each prompted with the tail of the previous one -- the same thing it trained on
-  * length: speech cap 510 tokens (20 s + start/stop) instead of 400; text <= 128 tokens
+  * length: speech cap 510 tokens (20 s + start/stop) instead of 400; text <= 330 tokens (near character-level tokenizer)
   * batches are bucketed by length (token budget, not a fixed count), so 2 s and 20 s windows do not share
     padding
   * eval loss on held-out creators, never on held-out windows of seen creators
@@ -25,7 +25,7 @@ from text2asmr.models.chatterbox_ft import ChatterboxFinetuner, load_backbone
 
 PROMPT_TOKENS = 96          # last ~3.8 s of the previous audio; the perceiver resamples it to a fixed size
 MAX_SPEECH = 510            # 20 s @ 25 Hz + start/stop
-MAX_TEXT = 128
+MAX_TEXT = 330           # chatterbox text tokens are near character-level: 55 words ~ 300 tokens
 
 
 def log(m): print(f"[{time.strftime('%F %T')}] {m}", flush=True)
