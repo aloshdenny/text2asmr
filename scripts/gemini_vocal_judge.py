@@ -58,7 +58,7 @@ def judge(wav: Path, key: str) -> dict:
             return {"pred": parse(txt), "raw": txt.strip()[:60], "gen_id": d.get("id"), "cost": cost}
         except Exception as e:
             err = getattr(e, "read", lambda: b"")() or str(e).encode()
-            if any(s in err for s in (b"429", b"500", b"502", b"503", b"520", b"529", b"timed out")) and i < 6:
+            if any(s in err for s in (b"429", b"500", b"502", b"503", b"504", b"520", b"529", b"timed out", b"aborted")) and i < 6:
                 time.sleep(min(90, 5 * 2 ** i)); continue
             return {"pred": None, "error": err[:120].decode(errors="replace"), "cost": 0.0}
 
@@ -87,6 +87,14 @@ def main() -> int:
     ledger = Ledger(a.ledger, a.cap)
     key = os.environ["OPENROUTER_API_KEY_GS"]
     sink = JsonlSink(a.out / f"{a.mode}.jsonl", key="uid")
+    # a row without a prediction (provider timeout) is not done: judge it again rather than skip it forever
+    ok_uids = set()
+    if (a.out / f"{a.mode}.jsonl").exists():
+        for l in open(a.out / f"{a.mode}.jsonl"):
+            try: r = json.loads(l)
+            except Exception: continue
+            if r.get("pred") is not None: ok_uids.add(r["uid"])
+    sink.seen = ok_uids
     tmp = Path(tempfile.mkdtemp(prefix="gvocal_", dir=str(a.out)))
     n, lock = [0], threading.Lock()
 
