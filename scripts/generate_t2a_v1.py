@@ -60,6 +60,38 @@ def plan(script: str, max_s: float) -> list[str]:
     return chunks
 
 
+_ASR = None
+_norm = lambda w: re.sub(r"[^a-z']", "", w.lower())
+
+
+def align_trim(wav: np.ndarray, sr: int, text: str) -> np.ndarray:
+    """Keep only [first word - 120 ms, last *expected* word + 250 ms], with 30 ms fades.
+
+    Chunk edges are where autoregressive TTS misbehaves: the final word gets clipped by an early stop token or
+    mutates into a different word as the model runs past its text. Whisper word timings find where the script's
+    words actually are; if the last heard word is not the script's last word, the chunk is cut back to the last
+    point where it still matches, so every seam falls in silence."""
+    global _ASR
+    import librosa
+    from faster_whisper import WhisperModel
+    if _ASR is None: _ASR = WhisperModel("small.en", device="cpu", compute_type="int8")
+    w16 = librosa.resample(wav, orig_sr=sr, target_sr=16000)
+    words = [w for seg in _ASR.transcribe(w16, language="en", word_timestamps=True, vad_filter=False)[0] for w in (seg.words or [])]
+    if not words: return wav
+    script = [_norm(t) for t in TAG.sub(" ", text).split() if _norm(t)]
+    end_i = len(words) - 1
+    if script and _norm(words[end_i].word) != script[-1]:
+        # walk back to the latest heard word that is one of the script's last three words
+        tail = set(script[-3:])
+        for j in range(len(words) - 1, max(-1, len(words) - 6), -1):
+            if _norm(words[j].word) in tail: end_i = j; break
+    s0 = max(0.0, words[0].start - 0.12); s1 = min(len(wav) / sr, words[end_i].end + 0.25)
+    out = wav[int(s0 * sr): int(s1 * sr)].copy()
+    f = min(int(0.03 * sr), len(out) // 2)
+    if f: out[:f] *= np.linspace(0, 1, f); out[-f:] *= np.linspace(1, 0, f)
+    return out
+
+
 def load(device: str, adapter: str | None):
     from chatterbox.tts import ChatterboxTTS
     if device == "mps":                                  # chatterbox checkpoints are saved on cuda; map them
@@ -90,6 +122,8 @@ def main() -> int:
     ap.add_argument("--cfg", type=float, default=0.5)
     ap.add_argument("--exaggeration", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--no-align-trim", action="store_true", help="skip word-aligned trimming of chunk edges")
+    ap.add_argument("--gap-s", type=float, default=0.45, help="silence between chunks (words never touch a seam)")
     a = ap.parse_args()
     torch.manual_seed(a.seed)
     import torch.nn.functional as F
@@ -118,11 +152,19 @@ def main() -> int:
             st = drop_invalid_tokens(st); st = st[st < 6561].to(model.device)
             wav, _ = model.s3gen.inference(speech_tokens=st, ref_dict=model.conds.gen)
         wav = wav.squeeze(0).detach().cpu().numpy()
-        log(f"chunk {i + 1}/{len(chunks)}: {len(st) / 25:.1f} s audio (predicted {predicted_s(text):.1f} s) "
-            f"in {time.time() - t0:.0f} s | {text[:70]}")
-        out += [wav, np.zeros(int(0.15 * sr), dtype=np.float32)]
-        if len(st) >= PROMPT_TOKENS:                                    # continuation prompt for the next chunk
-            prompt = st[-PROMPT_TOKENS:].unsqueeze(0).long()
+        raw_s = len(wav) / sr
+        if not a.no_align_trim:
+            wav = align_trim(wav, sr, text)
+        log(f"chunk {i + 1}/{len(chunks)}: {raw_s:.1f} s -> {len(wav) / sr:.1f} s after edge trim "
+            f"(predicted {predicted_s(text):.1f} s) in {time.time() - t0:.0f} s | {text[:70]}")
+        out += [wav, np.zeros(int(a.gap_s * sr), dtype=np.float32)]
+        # continuation prompt from the *trimmed* tail, so a garbled last word never seeds the next chunk
+        import librosa
+        tail16 = librosa.resample(wav[-int(6 * sr):], orig_sr=sr, target_sr=16000)
+        with torch.inference_mode():
+            pt, pl = model.s3gen.tokenizer.forward([tail16])
+        if int(pl[0]) >= PROMPT_TOKENS:
+            prompt = pt[:, :int(pl[0])][:, -PROMPT_TOKENS:].long().to(model.device)
     audio = np.concatenate(out)
     audio = model.watermarker.apply_watermark(audio, sample_rate=sr)
     import soundfile as sf
