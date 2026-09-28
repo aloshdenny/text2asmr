@@ -128,24 +128,34 @@ def main() -> int:
                 if taken[c] >= a.per_class or per_rec[(repo, src)] >= a.per_recording: continue
                 by_src[(repo, src)].append((uid, c)); per_rec[(repo, src)] += 1; taken[c] += 1
         log(f"in-domain sample: {dict(taken)} from {len(by_src)} recordings (pool sizes {dict(seen_n)})")
-        with ThreadPoolExecutor(a.concurrency) as ex:
-            for (repo, src), items in by_src.items():
-                if ledger.over(): log("ledger cap reached"); break
-                local = None
-                for i in range(5):
-                    try:
-                        time.sleep(0.5); local = hf_hub_download(repo, src, repo_type="dataset", cache_dir=str(a.out / "cache")); break
-                    except Exception as e:
-                        time.sleep(20 * 2 ** i)
-                if not local: continue
-                futs = []
-                for uid, c in items:
-                    w = tmp / (uid.replace("/", "_") + ".wav")
-                    if cut(local, int(uid.rsplit("_", 1)[1]) / 1000 - 1.0, 8.0, w):
-                        futs.append(ex.submit(one, uid, w, {"qwen": c, "repo": repo}))
-                for fu in futs: fu.result()
-                try: os.remove(os.path.realpath(local))
-                except OSError: pass
+        # one recording per download worker; each judges its clips on the shared Gemini pool. Sequential
+        # downloads made this ~550 clips/h (27 h for the full pass); three in flight, still Hub-paced.
+        judge_pool = ThreadPoolExecutor(a.concurrency)
+
+        def do_recording(k):
+            (repo, src), items = k
+            if ledger.over(): return
+            local = None
+            for i in range(5):
+                try:
+                    time.sleep(0.5); local = hf_hub_download(repo, src, repo_type="dataset", cache_dir=str(a.out / "cache")); break
+                except Exception:
+                    time.sleep(20 * 2 ** i)
+            if not local: return
+            futs = []
+            for uid, c in items:
+                w = tmp / (uid.replace("/", "_") + ".wav")
+                if cut(local, int(uid.rsplit("_", 1)[1]) / 1000 - 1.0, 8.0, w):
+                    futs.append(judge_pool.submit(one, uid, w, {"qwen": c, "repo": repo}))
+            for fu in futs: fu.result()
+            try: os.remove(os.path.realpath(local))
+            except OSError: pass
+        todo = [(k, [(u, c) for u, c in v if u not in sink.seen]) for k, v in by_src.items()]
+        todo = [t for t in todo if t[1]]
+        log(f"{sum(len(v) for _, v in todo)} clips left in {len(todo)} recordings")
+        with ThreadPoolExecutor(3) as dl:
+            list(dl.map(do_recording, todo))
+        judge_pool.shutdown(wait=True)
     sink.close()
     log(f"DONE {a.mode}: {n[0]} judged, ledger ${ledger.spent:.2f} / ${a.cap}")
     return 0
