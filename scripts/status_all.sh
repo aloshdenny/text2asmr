@@ -13,7 +13,7 @@ hr() { printf '\n== %s ==\n' "$1"; }
 
 hr "DO droplet"
 ssh -o ConnectTimeout=20 $DO 'bash -s' <<'EOF' 2>&1 || echo "FAIL droplet unreachable"
-for u in t2a-ytv t2a-gclean t2a-supervisor t2a-runpod-guard t2a-fountain; do
+for u in t2a-ytv t2a-supervisor t2a-runpod-guard t2a-fountain; do
   s=$(systemctl is-active $u); [ "$s" = active ] && echo "OK   $u" || echo "FAIL $u is $s"
 done
 echo "     disk free $(df -h / | awk 'NR==2{print $4}'), mem avail $(free -m | awk 'NR==2{print $7}') MB"
