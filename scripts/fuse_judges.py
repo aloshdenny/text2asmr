@@ -41,9 +41,25 @@ def load_calibration(d: Path, judge_files: dict[str, str]) -> tuple[list[str], d
     return classes, counts, answers
 
 
+def load_calibration_jsonl(path: Path) -> tuple[list[str], dict[str, np.ndarray], list[str]]:
+    """Calibration rows written by gemini_vocal_judge.py --mode calib: {truth, pred}."""
+    rows = [json.loads(l) for l in open(path)]
+    rows = [r for r in rows if r.get("pred") is not None]
+    classes = sorted({r["truth"] for r in rows if r["truth"] != OTHER})
+    answers = sorted({OTHER} | set(classes) | {r["pred"] for r in rows})
+    m = np.zeros((len(classes) + 1, len(answers)))
+    for r in rows:
+        i = classes.index(r["truth"]) if r["truth"] in classes else len(classes)
+        m[i, answers.index(r["pred"])] += 1
+    return classes, {"gemini": m}, answers
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--calib", type=Path, required=True, help="class_gate cutext work dir (human-labelled)")
+    ap.add_argument("--calib", type=Path, default=None, help="class_gate cutext work dir (human-labelled)")
+    ap.add_argument("--calib-jsonl", type=Path, default=None, help="gemini_vocal_judge calib.jsonl {truth, pred}")
+    ap.add_argument("--label-field", default="label", help="field holding the weak annotator's label (chapter / qwen)")
+    ap.add_argument("--extra-classes", default="", help="true classes with no human calibration (e.g. moaning)")
     ap.add_argument("--gemini-file", default="judge_google_gemini-3.1-pro-preview.jsonl")
     ap.add_argument("--items", type=Path, required=True, help="gemini_judged.jsonl: label = chapter, pred = gemini")
     ap.add_argument("--out", type=Path, required=True)
@@ -53,7 +69,15 @@ def main() -> int:
     ap.add_argument("--negative", type=float, default=0.1)
     a = ap.parse_args()
 
-    classes, calib, answers = load_calibration(a.calib, {"gemini": a.gemini_file})
+    if a.calib_jsonl: classes, calib, answers = load_calibration_jsonl(a.calib_jsonl)
+    else: classes, calib, answers = load_calibration(a.calib, {"gemini": a.gemini_file})
+    # classes nobody has human labels for still exist as truths: flat (unanchored) rows, learned by EM
+    for c in [x for x in a.extra_classes.split(",") if x and x not in classes]:
+        classes.append(c)
+        for k in calib: calib[k] = np.insert(calib[k], len(classes) - 1, 0.0, axis=0)
+        if c not in answers:
+            j = len(answers); answers.append(c)
+            for k in calib: calib[k] = np.insert(calib[k], j, 0.0, axis=1)
     K = classes + [OTHER]                                      # true-class space
     A = {c: i for i, c in enumerate(answers)}
     items = []
@@ -61,7 +85,7 @@ def main() -> int:
         r = json.loads(l)
         if r.get("pred") is None: continue
         g = r["pred"] if r["pred"] in A else OTHER
-        items.append((r["uid"], r["label"], g, r))
+        items.append((r["uid"], r[a.label_field], g, r))
     chap_vals = sorted({c for _, c, _, _ in items})
     C = {c: i for i, c in enumerate(chap_vals)}
     n = len(items); nk = len(K)
@@ -71,6 +95,7 @@ def main() -> int:
     # anchored prior for gemini: measured calibration counts, scaled; the unobserved 'other' row starts flat
     g_prior = calib["gemini"].copy()
     g_prior[-1, :] = 1.0
+    g_prior[g_prior.sum(1) == 0] = 1.0                          # unanchored truths start flat
     g_prior = g_prior / g_prior.sum(1, keepdims=True) * a.anchor + 0.5
     g_conf = g_prior / g_prior.sum(1, keepdims=True)
     # chapter annotator starts believing itself 60%, the rest spread evenly
@@ -92,12 +117,12 @@ def main() -> int:
         ch_conf = (c_cnt + 0.5) / (c_cnt + 0.5).sum(1, keepdims=True)
 
     # estimated precision of each chapter label: P(true = c | chapter says c)
-    print("\nchapter-title precision (EM estimate) and what it really contains:")
+    print(f"\n{a.label_field} label precision (EM estimate) and what it really contains:")
     for c, j in C.items():
         m = c_obs == j
         dist = post[m].mean(0)
         top = ", ".join(f"{K[k]} {dist[k]:.0%}" for k in np.argsort(-dist)[:3])
-        print(f"  '{c}' chapters (n={m.sum()}): {top}")
+        print(f"  '{c}' (n={m.sum()}): {top}")
     stats, rows = Counter(), []
     for i, (uid, chap, g, r) in enumerate(items):
         p = post[i]; k = int(p.argmax())
