@@ -88,7 +88,7 @@ def main() -> int:
     ap.add_argument("--cookies", type=Path, default=Path("/root/t2a/cookies.txt"))
     ap.add_argument("--vad-model", type=Path, default=Path("/root/t2a/models/silero_vad.onnx"))
     ap.add_argument("--max-speech", type=float, default=0.15, help="max VAD speech ratio in a no-talking span")
-    ap.add_argument("--min-db", type=float, default=-55.0, help="median 1 s RMS below this = silence")
+    ap.add_argument("--min-db", type=float, default=-65.0, help="median 1 s RMS below this = silence (quiet triggers like page turning sit at -55..-63)")
     ap.add_argument("--min-free-gb", type=float, default=6.0)
     a = ap.parse_args()
     from huggingface_hub import HfApi, CommitOperationAdd
