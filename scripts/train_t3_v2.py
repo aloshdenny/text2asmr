@@ -147,8 +147,11 @@ def main() -> int:
     if a.push:
         from huggingface_hub import HfApi
         api = HfApi(); api.create_repo(a.push, exist_ok=True)
+        # only the adapter: PEFT's auto README has an empty base_model (the Hub rejects it) and trainer_state.pt
+        # is optimizer state for resuming, not part of the model. The card lives in docs/T2A_V1_MODEL_CARD.md.
         api.upload_folder(repo_id=a.push, folder_path=str(a.out / "best"), path_in_repo="adapter",
-                          commit_message=f"T2A v1 speech adapter: held-out-creator loss {min(best, el):.4f}")
+                          allow_patterns=["adapter_config.json", "adapter_model.safetensors"],
+                          commit_message=f"T2A speech adapter: held-out-creator loss {min(best, el):.4f}")
         log(f"pushed -> {a.push}")
     log("TRAIN_DONE")
     return 0
