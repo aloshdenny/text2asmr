@@ -124,7 +124,9 @@ def main() -> int:
                     try: r = json.loads(l)
                     except Exception: continue
                     c = QWEN_MAP.get(r.get("label"))
-                    if not c or r["uid"] in sink.seen: continue
+                    # never exclude judged clips here: the sample must be the same on every restart, and
+                    # judged ones are skipped below -- excluding them drew a fresh 15k on each restart
+                    if not c: continue
                     seen_n[c] += 1; item = (repo, r["uid"], c)
                     if len(res[c]) < a.per_class * 3: res[c].append(item)
                     elif rng.random() < a.per_class * 3 / seen_n[c]: res[c][rng.randrange(len(res[c]))] = item
