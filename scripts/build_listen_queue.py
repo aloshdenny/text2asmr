@@ -32,8 +32,11 @@ def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 def cut(url: str, start: float, dur: float, out: Path) -> bool:
     for i in range(3):
-        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{max(0.0, start):.3f}", "-t", f"{dur:.3f}", "-i", url,
+        try:
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{max(0.0, start):.3f}", "-t", f"{dur:.3f}", "-i", url,
                             "-ac", "1", "-ar", str(SR), "-af", "loudnorm=I=-23:TP=-2", str(out)], capture_output=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            continue                                     # a stalled remote read: retry, never hang the build
         if r.returncode == 0 and out.exists() and out.stat().st_size > 20000: return True
         time.sleep(5 * (i + 1))
     return False
