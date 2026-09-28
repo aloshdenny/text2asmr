@@ -25,6 +25,7 @@ recent_blk=$(awk -v c="$(date -u -d '-2 hours' '+%F %T')" '/blocked/ && substr($
 echo "     gemini filter: $(grep -E '/33771' /root/t2a/gclean.log | tail -1 | cut -c1-150)"
 echo "     gemini ledger: $(cat /root/t2a/gclean/ledger.json 2>/dev/null)"
 grep -q "DONE judged" /root/t2a/gclean.log && echo "OK   gemini filter finished"
+echo "     gemini vocal judge: $(grep -E "judged|DONE|calibration|sample|Traceback" /root/t2a/gvocal.log 2>/dev/null | tail -1 | cut -c1-140)"
 echo "     supervisor: $(grep -E 'balance' /root/t2a/supervisor.log | tail -1 | cut -c1-120)"
 echo "     guard: $(tail -1 /root/t2a/runpod_guard.log | cut -c1-120)"
 EOF
@@ -37,7 +38,7 @@ r = urllib.request.Request("https://api.runpod.io/graphql?api_key=" + os.environ
                            headers={"Content-Type": "application/json", "User-Agent": "t2a-status/1.0"})
 m = json.loads(urllib.request.urlopen(r, timeout=60).read())["data"]["myself"]
 bal = m["clientBalance"]; burn = sum(p["costPerHr"] for p in m["pods"] if p["desiredStatus"] == "RUNNING")
-print(f"{'WARN' if bal < 25 else 'OK  '} balance ${bal:.2f}, burn ${burn:.2f}/h" + (f", ~{(bal - 20) / burn:.1f} h to the $20 floor" if burn else ""))
+print(f"{'WARN' if bal < 8 else 'OK  '} balance ${bal:.2f}, burn ${burn:.2f}/h" + (f", ~{max(0, bal - 2) / burn:.1f} h to the $2 guard floor" if burn else ""))
 names = [p["name"] for p in m["pods"]]
 for p in m["pods"]:
     rt = p.get("runtime") or {}; g = (rt.get("gpus") or [{}])[0].get("gpuUtilPercent")
