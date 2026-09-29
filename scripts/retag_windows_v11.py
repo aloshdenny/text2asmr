@@ -53,6 +53,8 @@ def main() -> int:
     ap.add_argument("--push", default="aoxo/t2a-speech-v2")
     ap.add_argument("--conf", type=float, default=0.8)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--emit-only", action="store_true",
+                    help="write judge_gaps.jsonl (the unconfirmed vocal-tag gaps) and stop; judge them, re-fuse, rerun")
     a = ap.parse_args()
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     from huggingface_hub import HfApi, hf_hub_download
@@ -104,7 +106,7 @@ def main() -> int:
         try: os.remove(p)
         except OSError: pass
         phrases = [s for s in split_alignment(align, src) if s.kind == "speech"]
-        out = {}
+        out, need = {}, []
         for u in uids:
             w = win[u]
             ph = [s for s in phrases if s.start >= w["start"] - 0.01 and s.end <= w["end"] + 0.01]
@@ -116,18 +118,22 @@ def main() -> int:
             for m, (g0, g1) in zip(tags, gaps):
                 t, note = decide(src, g0, g1, m.group(1), m.group(0))
                 notes.append(note)
+                if m.group(1) in VOCAL and not note.startswith("confirmed"):
+                    need.append({"uid": f"{src}_{int(g0 * 1000):09d}", "qwen": m.group(1), "repo": repo,
+                                 "start": round(g0, 3), "end": round(g1, 3)})
                 if t is None: drop = True; break
                 pieces += [w["text"][last:m.start()], t]; last = m.end()
             if drop: out[u] = ("drop", None, notes); continue
             pieces.append(w["text"][last:])
             out[u] = ("ok", "".join(pieces), notes)
-        return src, out
+        return src, (out, need)
 
-    t0 = time.time(); done = 0
+    t0 = time.time(); done = 0; to_judge = []
     with ThreadPoolExecutor(a.workers) as ex:
-        for src, out in ex.map(do, by_rec.items()):
+        for src, res in ex.map(do, by_rec.items()):
             done += 1
-            if out is None: stats["alignment unavailable"] += 1; continue
+            if res is None: stats["alignment unavailable"] += 1; continue
+            out, need = res; to_judge += need
             for u, (kind, text, notes) in out.items():
                 stats[kind] += 1
                 for n in notes: stats[n] += 1
@@ -136,6 +142,10 @@ def main() -> int:
             if done % 500 == 0:
                 log(f"  {done}/{len(by_rec)} recordings ({(time.time() - t0) / 60:.0f} min)")
     log("tag decisions: " + ", ".join(f"{k}={v}" for k, v in stats.most_common()))
+    seen_u = set(); uniq = [g for g in to_judge if not (g["uid"] in seen_u or seen_u.add(g["uid"]))]
+    (a.out / "judge_gaps.jsonl").write_text("".join(json.dumps(g) + "\n" for g in uniq), encoding="utf-8")
+    log(f"{len(uniq)} unconfirmed vocal-tag gaps -> {a.out / 'judge_gaps.jsonl'}")
+    if a.emit_only: log("EMIT_DONE"); return 0
 
     # ---- rewrite shards: stream v1 shards from the Hub, write v1.1, push, delete ----
     shards = sorted(f for f in api.list_repo_files(a.push, repo_type="dataset") if re.fullmatch(r"t3v2/shard_\d+\.pt", f))
@@ -152,12 +162,16 @@ def main() -> int:
         kept += len(out)
         dst = a.out / Path(f).name
         torch.save(out, dst)
-        for i in range(5):
+    # one commit per 40 shards: a commit per shard hit the Hub's hourly commit limit
+    from huggingface_hub import CommitOperationAdd
+    files = sorted(a.out.glob("shard_*.pt"))
+    for b in range(0, len(files), 40):
+        ops = [CommitOperationAdd(f"t3v11/{p.name}", str(p)) for p in files[b:b + 40]]
+        for i in range(6):
             try:
-                api.upload_file(path_or_fileobj=str(dst), path_in_repo=f"t3v11/{dst.name}", repo_id=a.push, repo_type="dataset",
-                                commit_message=f"t3 v1.1 retag: {dst.name}"); break
+                api.create_commit(a.push, repo_type="dataset", operations=ops, commit_message=f"t3 v1.1 retag shards {b}-{b + len(ops) - 1}"); break
             except Exception as e:
-                log(f"  push retry {i}: {type(e).__name__}"); time.sleep(30 * (i + 1))
+                log(f"  push retry {i}: {type(e).__name__} {str(e)[:80]}"); time.sleep(60 * (i + 1))
     log(f"RETAG_DONE windows kept {kept}, text changed {changed}, dropped {len(dropped)} -> {a.out} and {a.push}/t3v11")
     return 0
 

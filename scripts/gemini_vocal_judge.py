@@ -69,9 +69,44 @@ def cut(src: str, start: float, dur: float, out: Path) -> bool:
     return r.returncode == 0 and out.exists() and out.stat().st_size > 1000
 
 
+def _judge_recordings(a, by_src, ledger, tmp, one, sink):
+    """Download each recording once (a.dl_workers in flight, Hub-paced), cut its clips, judge them on a shared
+    Gemini pool of a.concurrency calls, delete the recording. Sequential downloads made this ~550 clips/h."""
+    from huggingface_hub import hf_hub_download
+    judge_pool = ThreadPoolExecutor(a.concurrency)
+
+    def do_recording(k):
+        (repo, src), items = k
+        if ledger.over(): return
+        local = None
+        for i in range(5):
+            try:
+                # local_dir, not cache_dir: on Windows (no symlinks) the Hub cache keeps a second copy under
+                # blobs/ that deleting the snapshot file leaves behind -- 2 GB leaked in an hour
+                time.sleep(0.5); local = hf_hub_download(repo, src, repo_type="dataset", local_dir=str(a.out / "dl")); break
+            except Exception:
+                time.sleep(20 * 2 ** i)
+        if not local: return
+        futs = []
+        for uid, c in items:
+            w = tmp / (uid.replace("/", "_") + ".wav")
+            if cut(local, int(uid.rsplit("_", 1)[1]) / 1000 - 1.0, 8.0, w):
+                futs.append(judge_pool.submit(one, uid, w, {"qwen": c, "repo": repo}))
+        for fu in futs: fu.result()
+        try: os.remove(local)
+        except OSError: pass
+    todo = [(k, [(u, c) for u, c in v if u not in sink.seen]) for k, v in by_src.items()]
+    todo = [t for t in todo if t[1]]
+    log(f"{sum(len(v) for _, v in todo)} clips left in {len(todo)} recordings")
+    with ThreadPoolExecutor(a.dl_workers) as dl:
+        list(dl.map(do_recording, todo))
+    judge_pool.shutdown(wait=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["calib", "indomain"], required=True)
+    ap.add_argument("--mode", choices=["calib", "indomain", "uids"], required=True)
+    ap.add_argument("--uids-file", type=Path, default=None, help="mode uids: jsonl of {uid, qwen, repo} to judge")
     ap.add_argument("--out", type=Path, default=Path("/root/t2a/gvocal"))
     ap.add_argument("--per-class", type=int, default=3000)
     ap.add_argument("--per-recording", type=int, default=6)
@@ -122,6 +157,13 @@ def main() -> int:
                 w = tmp / (r["uid"].replace("/", "_") + ".wav")
                 time.sleep(0.4)
                 if cut(r["url"], 0.0, 8.0, w): ex.submit(one, r["uid"], w, {"truth": HUMAN_MAP[r["t2a_class"]]})
+    elif a.mode == "uids":
+        by_src = defaultdict(list)
+        for l in open(a.uids_file, encoding="utf-8"):
+            g = json.loads(l)
+            if g["uid"] not in sink.seen: by_src[(g["repo"], g["uid"].rsplit("_", 1)[0])].append((g["uid"], g["qwen"]))
+        log(f"uids mode: {sum(len(v) for v in by_src.values())} clips in {len(by_src)} recordings")
+        _judge_recordings(a, by_src, ledger, tmp, one, sink)
     else:
         # recording-first sampling: every clip costs a full recording download (~15 MB), so drawing clips
         # uniformly gave ~2 clips per download. Pick recordings at random, then take up to --per-recording
@@ -154,36 +196,7 @@ def main() -> int:
                 pick = rng.sample(uids, min(len(uids), a.per_recording, room))
                 by_src[k] += [(u, c) for u in pick]; taken[c] += len(pick)
         log(f"in-domain sample: {dict(taken)} from {len(by_src)} recordings (pool sizes {dict(seen_n)})")
-        # one recording per download worker; each judges its clips on the shared Gemini pool. Sequential
-        # downloads made this ~550 clips/h (27 h for the full pass); three in flight, still Hub-paced.
-        judge_pool = ThreadPoolExecutor(a.concurrency)
-
-        def do_recording(k):
-            (repo, src), items = k
-            if ledger.over(): return
-            local = None
-            for i in range(5):
-                try:
-                    # local_dir, not cache_dir: on Windows (no symlinks) the Hub cache keeps a second copy under
-                    # blobs/ that deleting the snapshot file leaves behind -- 2 GB leaked in an hour
-                    time.sleep(0.5); local = hf_hub_download(repo, src, repo_type="dataset", local_dir=str(a.out / "dl")); break
-                except Exception:
-                    time.sleep(20 * 2 ** i)
-            if not local: return
-            futs = []
-            for uid, c in items:
-                w = tmp / (uid.replace("/", "_") + ".wav")
-                if cut(local, int(uid.rsplit("_", 1)[1]) / 1000 - 1.0, 8.0, w):
-                    futs.append(judge_pool.submit(one, uid, w, {"qwen": c, "repo": repo}))
-            for fu in futs: fu.result()
-            try: os.remove(local)
-            except OSError: pass
-        todo = [(k, [(u, c) for u, c in v if u not in sink.seen]) for k, v in by_src.items()]
-        todo = [t for t in todo if t[1]]
-        log(f"{sum(len(v) for _, v in todo)} clips left in {len(todo)} recordings")
-        with ThreadPoolExecutor(a.dl_workers) as dl:
-            list(dl.map(do_recording, todo))
-        judge_pool.shutdown(wait=True)
+        _judge_recordings(a, by_src, ledger, tmp, one, sink)
     sink.close()
     log(f"DONE {a.mode}: {n[0]} judged, ledger ${ledger.spent:.2f} / ${a.cap}")
     return 0
