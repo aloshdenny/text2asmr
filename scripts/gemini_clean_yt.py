@@ -94,7 +94,7 @@ def main() -> int:
     key = os.environ["OPENROUTER_API_KEY_GS"]
 
     by_src = defaultdict(list)
-    with open(a.windows or hf_hub_download("aoxo/clap-ft-data", "yt_windows/windows.jsonl", repo_type="dataset")) as fh:
+    with open(a.windows or hf_hub_download("aoxo/clap-ft-data", "yt_windows/windows.jsonl", repo_type="dataset"), encoding="utf-8") as fh:
         for line in fh:
             r = json.loads(line)
             if r.get("label") in targets and r["uid"] not in done:

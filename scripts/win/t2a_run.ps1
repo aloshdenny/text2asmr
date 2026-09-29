@@ -9,7 +9,7 @@ if ((Test-Path $pidf) -and (Get-Process -Id (Get-Content $pidf) -ErrorAction Sil
 $wrap = "D:\t2a\jobs\$Name.cmd"
 @"
 @echo off
-set TEMP=D:\t2a\tmp& set TMP=D:\t2a\tmp& set HF_HOME=D:\t2a\hf& set HF_HUB_DISABLE_XET=1& set PYTHONUNBUFFERED=1
+set PYTHONUTF8=1& set TEMP=D:\t2a\tmp& set TMP=D:\t2a\tmp& set HF_HOME=D:\t2a\hf& set HF_HUB_DISABLE_XET=1& set PYTHONUNBUFFERED=1
 set UV_CACHE_DIR=D:\t2a\cache\uv& set PIP_CACHE_DIR=D:\t2a\cache\pip& set TORCH_HOME=D:\t2a\cache\torch& set XDG_CACHE_HOME=D:\t2a\cache
 set PYTHONPATH=D:\t2a\text2asmr& set PATH=D:\t2a\venv\Scripts;D:\t2a\bin;%PATH%
 for /f "usebackq delims=" %%L in ("D:\t2a\secrets.env") do set "%%L"

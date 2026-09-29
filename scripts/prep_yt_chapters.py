@@ -53,12 +53,12 @@ def main():
     for f in metas:
         vid = f.split("/")[-1].replace(".info.json", "")
         if vid not in audios: continue
-        info = json.load(open(hf_hub_download(a.repo, f, repo_type="dataset")))
+        info = json.load(open(hf_hub_download(a.repo, f, repo_type="dataset"), encoding="utf-8"))
         chs = [{"start": c.get("start_time"), "end": c.get("end_time"), "cls": classify(c.get("title")), "title": c.get("title")} for c in (info.get("chapters") or [])]
         kind, speech = "legacy", []
         if f"labels/video/{vid}.json" in label_files:
             # discovery + droplet verification: a video-level label outranks the chapter keyword map
-            lab = json.load(open(hf_hub_download(a.repo, f"labels/video/{vid}.json", repo_type="dataset")))
+            lab = json.load(open(hf_hub_download(a.repo, f"labels/video/{vid}.json", repo_type="dataset"), encoding="utf-8"))
             kind, dur = lab["kind"], float(lab.get("duration_s") or info.get("duration") or 0)
             if kind == "chapter":
                 chs = [{"start": c["start"], "end": c["end"], "cls": lab["cls"], "title": c.get("title")} for c in lab["chapters"]]
@@ -70,7 +70,7 @@ def main():
                 chs = [{"start": lo + i * step, "end": min(hi, lo + i * step + 300.0), "cls": lab["cls"],
                         "title": f"[single] {lab['cls']}"} for i in range(nb)]
         if f"vad/{vid}.json" in vad_files:
-            speech = json.load(open(hf_hub_download(a.repo, f"vad/{vid}.json", repo_type="dataset")))["speech"]
+            speech = json.load(open(hf_hub_download(a.repo, f"vad/{vid}.json", repo_type="dataset"), encoding="utf-8"))["speech"]
         vids.append({"id": vid, "channel": info.get("channel") or info.get("uploader"), "kind": kind, "speech": speech,
                      "chapters": [c for c in chs if c["cls"] and c["end"] and c["start"] is not None]})
     if a.only_kind: vids = [v for v in vids if v["kind"] in a.only_kind.split(",")]
