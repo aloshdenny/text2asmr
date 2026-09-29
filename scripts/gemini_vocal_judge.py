@@ -101,8 +101,14 @@ def main() -> int:
     n, lock = [0], threading.Lock()
 
     def one(uid, wav, meta):
-        if ledger.over(): return
-        j = judge(wav, key); wav.unlink(missing_ok=True); ledger.add(j["cost"])
+        if ledger.over() or not wav.exists(): return    # a lost clip costs that clip, never the run
+        try:
+            j = judge(wav, key)
+        except Exception as e:
+            log(f"  {uid}: {type(e).__name__} {str(e)[:80]}"); return
+        finally:
+            wav.unlink(missing_ok=True)
+        ledger.add(j["cost"])
         with lock:
             sink.write(dict(meta, uid=uid, **j)); n[0] += 1
             if n[0] % 250 == 0: log(f"  {n[0]} judged, ledger ${ledger.spent:.2f}")
@@ -132,6 +138,10 @@ def main() -> int:
                     if c not in want_classes: continue
                     seen_n[c] += 1
                     pool[(repo, r["uid"].rsplit("_", 1)[0])][c].append(r["uid"])
+        # the ledgers hold duplicate rows (two pods once labelled the same shard): one clip must be judged once,
+        # or the first judgment deletes the wav the second still needs
+        for k in pool:
+            for c in pool[k]: pool[k][c] = sorted(set(pool[k][c]))
         recs = sorted(pool); rng.shuffle(recs)
         by_src, taken = defaultdict(list), Counter()
         for k in recs:
