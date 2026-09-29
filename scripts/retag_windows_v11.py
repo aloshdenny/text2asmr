@@ -143,7 +143,7 @@ def main() -> int:
             if drop: out[u] = ("drop", None, notes); continue
             pieces.append(w["text"][last:])
             out[u] = ("ok", "".join(pieces), notes)
-        return src, (out, need)
+        return out, need
 
     t0 = time.time(); done = 0; to_judge = []
     with ThreadPoolExecutor(a.workers) as ex:
