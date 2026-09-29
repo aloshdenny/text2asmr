@@ -93,8 +93,18 @@ def main() -> int:
         if old in ("breathing", "oral sounds"): return pause, f"unconfirmed {old} -> pause"
         return orig, f"kept {old}"                      # pauses and [moaning] (96% precise) stay exactly as written
 
+    gap_cache = a.out / "gaps.jsonl"                    # window uid -> gaps; saves re-fetching 18k alignments
+    cached = {}
+    if gap_cache.exists():
+        for l in open(gap_cache, encoding="utf-8"):
+            g = json.loads(l); cached[g["uid"]] = [tuple(x) for x in g["gaps"]]
+        log(f"gap cache: {len(cached)} windows")
+    gap_rows = []
+
     def do(item):
         (repo, src), uids = item
+        if uids and all(u in cached for u in uids):
+            return src, apply(repo, src, {u: cached[u] for u in uids})
         for i in range(5):
             try:
                 pace(); p = hf_hub_download(repo, src + ".json", repo_type="dataset", local_dir=str(scratch)); break
@@ -106,11 +116,18 @@ def main() -> int:
         try: os.remove(p)
         except OSError: pass
         phrases = [s for s in split_alignment(align, src) if s.kind == "speech"]
-        out, need = {}, []
+        gm = {}
         for u in uids:
             w = win[u]
             ph = [s for s in phrases if s.start >= w["start"] - 0.01 and s.end <= w["end"] + 0.01]
-            gaps = [(x.end, y.start) for x, y in zip(ph, ph[1:]) if y.start - x.end >= 0.7]
+            gm[u] = [(round(x.end, 3), round(y.start, 3)) for x, y in zip(ph, ph[1:]) if y.start - x.end >= 0.7]
+            gap_rows.append({"uid": u, "gaps": gm[u]})
+        return src, apply(repo, src, gm)
+
+    def apply(repo, src, gm):
+        out, need = {}, []
+        for u, gaps in gm.items():
+            w = win[u]
             tags = list(TAG.finditer(w["text"]))
             if len(gaps) != len(tags):
                 out[u] = ("mismatch", w["text"], []); continue
@@ -141,6 +158,8 @@ def main() -> int:
                 elif kind == "ok": new_text[u] = text
             if done % 500 == 0:
                 log(f"  {done}/{len(by_rec)} recordings ({(time.time() - t0) / 60:.0f} min)")
+    if gap_rows:
+        with open(gap_cache, "a", encoding="utf-8") as fh: fh.write("".join(json.dumps(g) + "\n" for g in gap_rows))
     log("tag decisions: " + ", ".join(f"{k}={v}" for k, v in stats.most_common()))
     seen_u = set(); uniq = [g for g in to_judge if not (g["uid"] in seen_u or seen_u.add(g["uid"]))]
     (a.out / "judge_gaps.jsonl").write_text("".join(json.dumps(g) + "\n" for g in uniq), encoding="utf-8")
