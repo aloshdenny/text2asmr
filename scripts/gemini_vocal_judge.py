@@ -79,6 +79,7 @@ def main() -> int:
     ap.add_argument("--ledger", type=Path, default=Path("/root/t2a/gclean/ledger.json"))
     ap.add_argument("--cap", type=float, default=1000.0)
     ap.add_argument("--concurrency", type=int, default=6)
+    ap.add_argument("--dl-workers", type=int, default=3, help="recordings downloading at once")
     a = ap.parse_args()
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     from huggingface_hub import HfApi, hf_hub_download
@@ -116,9 +117,11 @@ def main() -> int:
                 time.sleep(0.4)
                 if cut(r["url"], 0.0, 8.0, w): ex.submit(one, r["uid"], w, {"truth": HUMAN_MAP[r["t2a_class"]]})
     else:
-        # reservoir-sample Qwen-labelled clips per class, streaming (the droplet has 1 GB of RAM)
+        # recording-first sampling: every clip costs a full recording download (~15 MB), so drawing clips
+        # uniformly gave ~2 clips per download. Pick recordings at random, then take up to --per-recording
+        # clips of the wanted classes from each: the same creator spread, ~4x fewer downloads.
         want_classes = set(a.classes.split(","))
-        rng = random.Random(0); res, seen_n = defaultdict(list), Counter()
+        rng = random.Random(0); pool, seen_n = defaultdict(lambda: defaultdict(list)), Counter()
         for repo in ("aoxo/t2a-mommy", "aoxo/t2a-daddy"):
             for f in HfApi().list_repo_files(repo, repo_type="dataset"):
                 if not (f.startswith("labels/qwen3omni") and f.endswith(".jsonl")): continue
@@ -127,19 +130,17 @@ def main() -> int:
                     except Exception: continue
                     c = QWEN_MAP.get(r.get("label"))
                     if c not in want_classes: continue
-                    # never exclude judged clips here: the sample must be the same on every restart, and
-                    # judged ones are skipped below -- excluding them drew a fresh 15k on each restart
-                    if not c: continue
-                    seen_n[c] += 1; item = (repo, r["uid"], c)
-                    if len(res[c]) < a.per_class * 3: res[c].append(item)
-                    elif rng.random() < a.per_class * 3 / seen_n[c]: res[c][rng.randrange(len(res[c]))] = item
-        by_src, per_rec, taken = defaultdict(list), Counter(), Counter()
-        for c in [x for x in CLASSES if x in want_classes]:
-            rng.shuffle(res[c])
-            for repo, uid, _ in res[c]:
-                src = uid.rsplit("_", 1)[0]
-                if taken[c] >= a.per_class or per_rec[(repo, src)] >= a.per_recording: continue
-                by_src[(repo, src)].append((uid, c)); per_rec[(repo, src)] += 1; taken[c] += 1
+                    seen_n[c] += 1
+                    pool[(repo, r["uid"].rsplit("_", 1)[0])][c].append(r["uid"])
+        recs = sorted(pool); rng.shuffle(recs)
+        by_src, taken = defaultdict(list), Counter()
+        for k in recs:
+            if all(taken[c] >= a.per_class for c in want_classes): break
+            for c, uids in pool[k].items():
+                room = a.per_class - taken[c]
+                if room <= 0: continue
+                pick = rng.sample(uids, min(len(uids), a.per_recording, room))
+                by_src[k] += [(u, c) for u in pick]; taken[c] += len(pick)
         log(f"in-domain sample: {dict(taken)} from {len(by_src)} recordings (pool sizes {dict(seen_n)})")
         # one recording per download worker; each judges its clips on the shared Gemini pool. Sequential
         # downloads made this ~550 clips/h (27 h for the full pass); three in flight, still Hub-paced.
@@ -166,7 +167,7 @@ def main() -> int:
         todo = [(k, [(u, c) for u, c in v if u not in sink.seen]) for k, v in by_src.items()]
         todo = [t for t in todo if t[1]]
         log(f"{sum(len(v) for _, v in todo)} clips left in {len(todo)} recordings")
-        with ThreadPoolExecutor(3) as dl:
+        with ThreadPoolExecutor(a.dl_workers) as dl:
             list(dl.map(do_recording, todo))
         judge_pool.shutdown(wait=True)
     sink.close()
