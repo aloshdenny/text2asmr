@@ -76,6 +76,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=Path("/root/t2a/gclean"))
     ap.add_argument("--cap", type=float, required=True, help="USD, cumulative across runs (ledger)")
     ap.add_argument("--classes", default=",".join(TARGETS))
+    ap.add_argument("--push-path", default="yt_windows/gemini_judged.jsonl",
+                    help="Hub path for results; give each run its own so one never overwrites another's paid output")
+    ap.add_argument("--windows", type=Path, default=None, help="local windows.jsonl (default: the Hub's yt_windows/windows.jsonl)")
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--push-every", type=int, default=2000, help="upload results to HF every N judged")
     a = ap.parse_args()
@@ -91,11 +94,11 @@ def main() -> int:
     key = os.environ["OPENROUTER_API_KEY_GS"]
 
     by_src = defaultdict(list)
-    with open(hf_hub_download("aoxo/clap-ft-data", "yt_windows/windows.jsonl", repo_type="dataset")) as fh:
+    with open(a.windows or hf_hub_download("aoxo/clap-ft-data", "yt_windows/windows.jsonl", repo_type="dataset")) as fh:
         for line in fh:
             r = json.loads(line)
             if r.get("label") in targets and r["uid"] not in done:
-                by_src[(r["repo"], r["source"])].append({k: r[k] for k in ("uid", "label", "source", "start", "dur", "split")})
+                by_src[(r["repo"], r["source"])].append({k: r.get(k) for k in ("uid", "label", "source", "start", "dur", "split", "kind")})
     total = sum(len(v) for v in by_src.values())
     log(f"{total} windows to judge in {len(by_src)} videos ({len(done)} already); ledger ${ledger.spent:.2f} / ${a.cap}")
 
@@ -128,7 +131,7 @@ def main() -> int:
 
     def push():
         try:
-            api.upload_file(path_or_fileobj=str(res_path), path_in_repo="yt_windows/gemini_judged.jsonl",
+            api.upload_file(path_or_fileobj=str(res_path), path_in_repo=a.push_path,
                             repo_id="aoxo/clap-ft-data", repo_type="dataset",
                             commit_message=f"gemini chapter filter: {n[0]} judged, ${ledger.spent:.2f}")
         except Exception as e:

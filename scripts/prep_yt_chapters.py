@@ -37,6 +37,8 @@ def main():
     # A pod is ephemeral: fp16 mel shards for 240 chapter-hours are ~37 GB and would die with it. In
     # manifest mode the pod does the expensive part (decode + loudness gate + chapter mapping) and emits a
     # few MB of window geometry, which any later run can cut mels from.
+    ap.add_argument("--only-kind", default="", help="comma list of video kinds to process: single,chapter,legacy")
+    ap.add_argument("--only-classes", default="", help="comma list: keep only videos/chapters of these classes")
     ap.add_argument("--per-single", type=int, default=200, help="windows per verified single-trigger video")
     ap.add_argument("--single-blocks", type=int, default=6, help="300 s blocks sampled across a single-trigger video")
     ap.add_argument("--manifest-only", action="store_true", help="emit window rows, skip mel shards (no GPU needed)")
@@ -71,6 +73,11 @@ def main():
             speech = json.load(open(hf_hub_download(a.repo, f"vad/{vid}.json", repo_type="dataset")))["speech"]
         vids.append({"id": vid, "channel": info.get("channel") or info.get("uploader"), "kind": kind, "speech": speech,
                      "chapters": [c for c in chs if c["cls"] and c["end"] and c["start"] is not None]})
+    if a.only_kind: vids = [v for v in vids if v["kind"] in a.only_kind.split(",")]
+    if a.only_classes:
+        keep = set(a.only_classes.split(","))
+        vids = [dict(v, chapters=[c for c in v["chapters"] if c["cls"] in keep]) for v in vids]
+        vids = [v for v in vids if v["chapters"]]
     log(f"videos with audio+meta: {len(vids)}; labeled chapters: {sum(len(v['chapters']) for v in vids)}; class chapters: {Counter(c['cls'] for v in vids for c in v['chapters']).most_common()}")
     gm = None if a.manifest_only else GpuMel()
     w = None if a.manifest_only else ShardWriter(a.out, 4000)
