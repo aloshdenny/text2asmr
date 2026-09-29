@@ -13,7 +13,7 @@ Shares gemini_clean_yt's spend ledger: one $1000 cap across every Gemini job. Pa
   python gemini_vocal_judge.py --mode indomain --per-class 3000 --out /root/t2a/gvocal
 """
 from __future__ import annotations
-import argparse, base64, json, os, random, subprocess, sys, tempfile, threading, time, urllib.request
+import argparse, base64, json, os, random, shutil, subprocess, sys, tempfile, threading, time, urllib.request
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -131,7 +131,8 @@ def main() -> int:
         for repo in ("aoxo/t2a-mommy", "aoxo/t2a-daddy"):
             for f in HfApi().list_repo_files(repo, repo_type="dataset"):
                 if not (f.startswith("labels/qwen3omni") and f.endswith(".jsonl")): continue
-                for l in open(hf_hub_download(repo, f, repo_type="dataset")):
+                lf = hf_hub_download(repo, f, repo_type="dataset", local_dir=str(a.out / "labels_tmp"))
+                for l in open(lf, encoding="utf-8"):
                     try: r = json.loads(l)
                     except Exception: continue
                     c = QWEN_MAP.get(r.get("label"))
@@ -142,6 +143,7 @@ def main() -> int:
         # or the first judgment deletes the wav the second still needs
         for k in pool:
             for c in pool[k]: pool[k][c] = sorted(set(pool[k][c]))
+        shutil.rmtree(a.out / "labels_tmp", ignore_errors=True)   # only needed for sampling
         recs = sorted(pool); rng.shuffle(recs)
         by_src, taken = defaultdict(list), Counter()
         for k in recs:
@@ -162,7 +164,9 @@ def main() -> int:
             local = None
             for i in range(5):
                 try:
-                    time.sleep(0.5); local = hf_hub_download(repo, src, repo_type="dataset", cache_dir=str(a.out / "cache")); break
+                    # local_dir, not cache_dir: on Windows (no symlinks) the Hub cache keeps a second copy under
+                    # blobs/ that deleting the snapshot file leaves behind -- 2 GB leaked in an hour
+                    time.sleep(0.5); local = hf_hub_download(repo, src, repo_type="dataset", local_dir=str(a.out / "dl")); break
                 except Exception:
                     time.sleep(20 * 2 ** i)
             if not local: return
@@ -172,7 +176,7 @@ def main() -> int:
                 if cut(local, int(uid.rsplit("_", 1)[1]) / 1000 - 1.0, 8.0, w):
                     futs.append(judge_pool.submit(one, uid, w, {"qwen": c, "repo": repo}))
             for fu in futs: fu.result()
-            try: os.remove(os.path.realpath(local))
+            try: os.remove(local)
             except OSError: pass
         todo = [(k, [(u, c) for u, c in v if u not in sink.seen]) for k, v in by_src.items()]
         todo = [t for t in todo if t[1]]

@@ -111,7 +111,7 @@ def main() -> int:
             if stop.is_set(): break
             vid = src.split(":", 1)[1]; local = None
             try:
-                local = hf_hub_download(repo, f"audio/{vid}.flac", repo_type="dataset", cache_dir=str(a.out / "cache"))
+                local = hf_hub_download(repo, f"audio/{vid}.flac", repo_type="dataset", local_dir=str(a.out / "dl"))
                 for r in rows:
                     if stop.is_set(): break
                     w = tmp / (safe_name(r["uid"]) + ".wav")
@@ -122,7 +122,7 @@ def main() -> int:
                 log(f"  {src}: {type(e).__name__} {str(e)[:80]}")
             finally:
                 if local:
-                    try: os.remove(os.path.realpath(local))
+                    try: os.remove(local)
                     except OSError: pass
         for _ in range(a.concurrency): work.put(None)
 
