@@ -75,6 +75,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=Path("/root/t2a/gvocal"))
     ap.add_argument("--per-class", type=int, default=3000)
     ap.add_argument("--per-recording", type=int, default=6)
+    ap.add_argument("--classes", default=",".join(CLASSES), help="Qwen classes to sample (e.g. breathing,oral sounds)")
     ap.add_argument("--ledger", type=Path, default=Path("/root/t2a/gclean/ledger.json"))
     ap.add_argument("--cap", type=float, default=1000.0)
     ap.add_argument("--concurrency", type=int, default=6)
@@ -116,6 +117,7 @@ def main() -> int:
                 if cut(r["url"], 0.0, 8.0, w): ex.submit(one, r["uid"], w, {"truth": HUMAN_MAP[r["t2a_class"]]})
     else:
         # reservoir-sample Qwen-labelled clips per class, streaming (the droplet has 1 GB of RAM)
+        want_classes = set(a.classes.split(","))
         rng = random.Random(0); res, seen_n = defaultdict(list), Counter()
         for repo in ("aoxo/t2a-mommy", "aoxo/t2a-daddy"):
             for f in HfApi().list_repo_files(repo, repo_type="dataset"):
@@ -124,6 +126,7 @@ def main() -> int:
                     try: r = json.loads(l)
                     except Exception: continue
                     c = QWEN_MAP.get(r.get("label"))
+                    if c not in want_classes: continue
                     # never exclude judged clips here: the sample must be the same on every restart, and
                     # judged ones are skipped below -- excluding them drew a fresh 15k on each restart
                     if not c: continue
@@ -131,7 +134,7 @@ def main() -> int:
                     if len(res[c]) < a.per_class * 3: res[c].append(item)
                     elif rng.random() < a.per_class * 3 / seen_n[c]: res[c][rng.randrange(len(res[c]))] = item
         by_src, per_rec, taken = defaultdict(list), Counter(), Counter()
-        for c in CLASSES:
+        for c in [x for x in CLASSES if x in want_classes]:
             rng.shuffle(res[c])
             for repo, uid, _ in res[c]:
                 src = uid.rsplit("_", 1)[0]
