@@ -108,14 +108,22 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
 
     # enforce pauses: [pause Ns] gets at least N s of quiet; every vocal event is followed by event_pause s of
     # quiet before speech resumes, so a breath or moan never runs straight into the next sentence
-    inserts = []
+    inserts = []                                         # (time, seconds of quiet, exhale tail or None)
     for name, secs, prev_k, next_k in tags:
         if next_k not in s2h or next_k >= len(real): continue
         t_next = words[s2h[next_k]].start
         t_prev = words[s2h[prev_k]].end if prev_k >= 0 and prev_k in s2h else s0
-        need = (secs - (t_next - t_prev)) if name == "pause" and secs else (event_pause if name != "pause" else 0.0)
-        at = max(t_prev, t_next - 0.06)
-        if need > 0.08 and s0 <= at <= s1: inserts.append((at, need))
+        if name == "pause":
+            need = (secs or 0.0) - (t_next - t_prev); at = max(t_prev, t_next - 0.06)
+            if need > 0.08 and s0 <= at <= s1: inserts.append((at, need, None))
+            continue
+        tail = exhale_tail(wav, sr, t_prev, t_next) if name in ("moaning", "breathing") else None
+        if tail is not None:
+            at, x = tail                                 # the moan/breath releases into a slow exhale
+            inserts.append((at, max(0.0, event_pause - len(x) / sr), x))
+        else:
+            at = max(t_prev, t_next - 0.06)
+            if s0 <= at <= s1: inserts.append((at, event_pause, None))
     frames = [wav[i:i + int(0.1 * sr)] for i in range(0, max(1, len(wav) - int(0.1 * sr)), int(0.1 * sr))]
     tone = min(frames, key=lambda f: float(np.sqrt(np.mean(f ** 2)) if len(f) else 1.0)) if frames else np.zeros(int(0.1 * sr))
 
@@ -125,15 +133,42 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
         if f: q[:f] *= np.linspace(0, 1, f); q[-f:] *= np.linspace(1, 0, f)
         return q
     parts, last = [], s0
-    for at, need in sorted(inserts):
-        parts += [wav[int(last * sr): int(at * sr)], quiet(need)]; last = at
+    for at, need, x in sorted(inserts, key=lambda r: r[0]):
+        parts.append(wav[int(last * sr): int(at * sr)])
+        if x is not None: parts.append(x)
+        if need > 0.05: parts.append(quiet(need))
+        last = at
     parts.append(wav[int(last * sr): int(s1 * sr)])
     out = np.concatenate(parts).astype(np.float32)
     f = min(int(0.03 * sr), len(out) // 2)
     if f: out[:f] *= np.linspace(0, 1, f); out[-f:] *= np.linspace(1, 0, f)
-    added = sum(n for _, n in inserts)
+    added = sum(n + (len(x) / sr if x is not None else 0) for _, n, x in inserts)
     note = "ok" if dropped <= 0 else f"model dropped the last {dropped} word(s)"
     return out, note + (f", +{added:.1f}s enforced pauses" if added else "")
+
+
+def exhale_tail(wav: np.ndarray, sr: int, g0: float, g1: float, keep: float = 0.35, stretch: float = 2.5):
+    """A slow exhale after a moan or breath, made from the event's own ending (same voice, same room).
+
+    Finds where the event's sound ends inside the gap [g0, g1], stretches its last `keep` seconds `stretch`x
+    (pitch-preserving) and fades that out, so the event releases instead of stopping dead. Returns
+    (time to insert at, audio) or None when the gap holds no clear event sound."""
+    import librosa
+    a, b = int(g0 * sr), int(g1 * sr)
+    if b - a < int(0.3 * sr): return None
+    seg = wav[a:b]; hop = int(0.02 * sr)
+    db = np.array([20 * np.log10(np.sqrt(np.mean(seg[i:i + hop] ** 2)) + 1e-9) for i in range(0, len(seg) - hop, hop)])
+    if not len(db) or db.max() < -50: return None
+    loud = np.where(db > max(-50.0, db.max() - 25))[0]
+    e = a + (loud[-1] + 1) * hop                         # end of the event's audible part
+    src = wav[max(a, e - int(keep * sr)): e].astype(np.float32)
+    if len(src) < int(0.1 * sr): return None
+    x = librosa.effects.time_stretch(src, rate=1.0 / stretch).astype(np.float32)
+    x *= np.linspace(1.0, 0.0, len(x)) ** 2              # decays like an out-breath
+    x *= 0.8                                             # a touch softer than the event itself
+    f = min(int(0.02 * sr), len(x) // 2)
+    if f: x[:f] *= np.linspace(0, 1, f)                  # no click at the join
+    return e / sr, x
 
 
 def load(device: str, adapter: str | None):
