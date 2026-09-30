@@ -64,32 +64,42 @@ _ASR = None
 _norm = lambda w: re.sub(r"[^a-z']", "", w.lower())
 
 
-def align_trim(wav: np.ndarray, sr: int, text: str) -> np.ndarray:
-    """Keep only [first word - 120 ms, last *expected* word + 250 ms], with 30 ms fades.
+def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str]) -> tuple[np.ndarray, str]:
+    """Cut the chunk to [first word - 120 ms, the pause between its last real word and the look-ahead].
 
-    Chunk edges are where autoregressive TTS misbehaves: the final word gets clipped by an early stop token or
-    mutates into a different word as the model runs past its text. Whisper word timings find where the script's
-    words actually are; if the last heard word is not the script's last word, the chunk is cut back to the last
-    point where it still matches, so every seam falls in silence."""
+    An autoregressive TTS under-pronounces the final word of its input: it stops early ("brea-") or the word
+    mutates. So every chunk is generated with the next chunk's first words appended (look-ahead): the real last
+    word is never the sequence end and gets spoken fully. Whisper word timings, aligned to the expected words,
+    find the pause after the real last word; the cut goes midway through that pause and the look-ahead audio is
+    thrown away. The next chunk says those words for real."""
     global _ASR
-    import librosa
+    import difflib, librosa
     from faster_whisper import WhisperModel
     if _ASR is None: _ASR = WhisperModel("small.en", device="cpu", compute_type="int8")
     w16 = librosa.resample(wav, orig_sr=sr, target_sr=16000)
     words = [w for seg in _ASR.transcribe(w16, language="en", word_timestamps=True, vad_filter=False)[0] for w in (seg.words or [])]
-    if not words: return wav
-    script = [_norm(t) for t in TAG.sub(" ", text).split() if _norm(t)]
-    end_i = len(words) - 1
-    if script and _norm(words[end_i].word) != script[-1]:
-        # walk back to the latest heard word that is one of the script's last three words
-        tail = set(script[-3:])
-        for j in range(len(words) - 1, max(-1, len(words) - 6), -1):
-            if _norm(words[j].word) in tail: end_i = j; break
-    s0 = max(0.0, words[0].start - 0.12); s1 = min(len(wav) / sr, words[end_i].end + 0.25)
+    if not words: return wav, "no words heard"
+    real = [_norm(t) for t in TAG.sub(" ", text).split() if _norm(t)]
+    la = [_norm(t) for t in lookahead if _norm(t)]
+    heard = [_norm(w.word) for w in words]
+    sm = difflib.SequenceMatcher(a=real + la, b=heard, autojunk=False)
+    s2h = {}
+    for blk in sm.get_matching_blocks():
+        for k in range(blk.size): s2h[blk.a + k] = blk.b + k
+    jw = max((s2h[i] for i in range(len(real)) if i in s2h), default=None)          # last real word heard
+    jl = min((s2h[i] for i in range(len(real), len(real) + len(la)) if i in s2h), default=None)  # first look-ahead
+    if jw is None: return wav, "no script words matched"
+    end_w = words[jw].end
+    if jl is not None and jl > jw:
+        cut = max(end_w + 0.05, (end_w + words[jl].start) / 2)                         # middle of the pause
+    else:
+        cut = end_w + 0.3                                                              # look-ahead not spoken
+    dropped = len(real) - 1 - max(i for i in range(len(real)) if i in s2h)
+    s0 = max(0.0, words[0].start - 0.12); s1 = min(len(wav) / sr, cut)
     out = wav[int(s0 * sr): int(s1 * sr)].copy()
     f = min(int(0.03 * sr), len(out) // 2)
     if f: out[:f] *= np.linspace(0, 1, f); out[-f:] *= np.linspace(1, 0, f)
-    return out
+    return out, ("ok" if dropped <= 0 else f"model dropped the last {dropped} word(s)")
 
 
 def load(device: str, adapter: str | None):
@@ -119,7 +129,7 @@ def main() -> int:
     ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     ap.add_argument("--max-chunk-s", type=float, default=18.0)
     ap.add_argument("--temperature", type=float, default=0.8)
-    ap.add_argument("--cfg", type=float, default=0.5)
+    ap.add_argument("--cfg", type=float, default=0.3, help="lower = slower, more deliberate pacing")
     ap.add_argument("--exaggeration", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-align-trim", action="store_true", help="skip word-aligned trimming of chunk edges")
@@ -139,10 +149,13 @@ def main() -> int:
     prompt = base.cond_prompt_speech_tokens[:, -PROMPT_TOKENS:]          # same prompt length as training
     hp = model.t3.hp
     out, sr = [], model.sr
+    TAIL = ["Okay", "then."]                                  # look-ahead for the final chunk; always cut off
     for i, text in enumerate(chunks):
+        lookahead = (TAG.sub(" ", chunks[i + 1]).split()[:3] if i + 1 < len(chunks) else TAIL)
+        gen_text = text if a.no_align_trim else f"{text} {' '.join(lookahead)}"
         cond = T3Cond(speaker_emb=base.speaker_emb, cond_prompt_speech_tokens=prompt,
                       emotion_adv=a.exaggeration * torch.ones(1, 1, 1)).to(device=model.device)
-        tt = model.tokenizer.text_to_tokens(punc_norm(text)).to(model.device)
+        tt = model.tokenizer.text_to_tokens(punc_norm(gen_text)).to(model.device)
         if a.cfg > 0: tt = torch.cat([tt, tt], dim=0)
         tt = F.pad(F.pad(tt, (1, 0), value=hp.start_text_token), (0, 1), value=hp.stop_text_token)
         t0 = time.time()
@@ -153,10 +166,11 @@ def main() -> int:
             wav, _ = model.s3gen.inference(speech_tokens=st, ref_dict=model.conds.gen)
         wav = wav.squeeze(0).detach().cpu().numpy()
         raw_s = len(wav) / sr
+        note = "untrimmed"
         if not a.no_align_trim:
-            wav = align_trim(wav, sr, text)
-        log(f"chunk {i + 1}/{len(chunks)}: {raw_s:.1f} s -> {len(wav) / sr:.1f} s after edge trim "
-            f"(predicted {predicted_s(text):.1f} s) in {time.time() - t0:.0f} s | {text[:70]}")
+            wav, note = align_trim(wav, sr, text, lookahead)
+        log(f"chunk {i + 1}/{len(chunks)}: {raw_s:.1f} s -> {len(wav) / sr:.1f} s ({note}; "
+            f"predicted {predicted_s(text):.1f} s) in {time.time() - t0:.0f} s | {text[:70]}")
         out += [wav, np.zeros(int(a.gap_s * sr), dtype=np.float32)]
         # continuation prompt from the *trimmed* tail, so a garbled last word never seeds the next chunk
         import librosa
