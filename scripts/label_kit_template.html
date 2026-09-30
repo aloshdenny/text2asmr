@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASMR Ear Check</title>
+<style>
+:root{
+  --bg:#F2F0F4; --surface:#FFFFFF; --ink:#1D1A24; --muted:#6B6475; --line:#DCD7E2;
+  --accent:#2F7A74; --accent-ink:#FFFFFF; --accent-soft:#DCEEEC; --warn:#A25B12; --done:#3E7A3A; --chip:#F7F5F9;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#15131A; --surface:#1F1C25; --ink:#ECE8F2; --muted:#9C95A8; --line:#34303D;
+  --accent:#6FC1B8; --accent-ink:#0F1B1A; --accent-soft:#1F3533; --warn:#E0A15C; --done:#8CC787; --chip:#26222D;
+  color-scheme:dark;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);padding-inline:16px;padding-block:20px 40px}
+.wrap{max-width:760px;margin:0 auto;display:grid;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
+h1{font-size:20px;font-weight:600;margin:0}
+.sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+.who{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.who label{font-size:13px;color:var(--muted)}
+.who input{font:14px var(--sans);padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);width:180px}
+.count{font:500 13px var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.count b{color:var(--ink);font-weight:500}
+.bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:grid;gap:16px}
+.player{display:flex;align-items:center;gap:14px}
+.play{flex:none;width:56px;height:56px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);cursor:pointer;display:grid;place-items:center}
+.play svg{width:22px;height:22px;fill:currentColor}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.track{flex:1;display:grid;gap:6px}
+.prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:var(--accent)}
+.meta{display:flex;justify-content:space-between;font:12px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.q{font-size:14px;color:var(--muted);margin:0}
+.group{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:4px 0 -6px}
+.chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.chip{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--chip);color:var(--ink);font:14px var(--sans);text-align:left;cursor:pointer;min-height:40px}
+.chip kbd{flex:none;font:500 11px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 5px;min-width:18px;text-align:center;background:var(--surface)}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent)}
+.chip[aria-pressed="true"] kbd{border-color:var(--accent);color:var(--ink)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between}
+.actions div{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:9px 14px;font:500 14px var(--sans);cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.status{font-size:13px;color:var(--muted);min-height:20px}
+.status.warn{color:var(--warn)} .status.ok{color:var(--done)}
+.help{font-size:13px;color:var(--muted);display:grid;gap:4px}
+.help code{font:12px var(--mono)}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>ASMR Ear Check</h1>
+      <p class="sub">Label what you hear in each short clip. When you're done (or stopping), save a labelled copy and send it back.</p>
+    </div>
+    <div class="who">
+      <label for="who">Your name</label>
+      <input id="who" type="text" autocomplete="name" placeholder="so we know who labelled">
+      <button class="btn primary" id="export" type="button">Save labelled copy</button>
+    </div>
+  </header>
+  <div class="count" id="count"><b>0</b> / 0 labelled</div>
+  <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+
+  <section class="card" aria-label="Current clip">
+    <div class="player">
+      <button class="play" id="play" type="button" aria-label="Play clip (space)"><svg viewBox="0 0 24 24" id="icon"><path d="M8 5v14l11-7z"/></svg></button>
+      <div class="track">
+        <div class="prog"><i id="prog"></i></div>
+        <div class="meta"><span id="clipno">clip -</span><span id="time">0.0 / 0.0 s</span></div>
+      </div>
+    </div>
+    <p class="q">Pick everything that is clearly present, then save. More than one is fine.</p>
+    <div id="chips"></div>
+    <div class="actions">
+      <div><button class="btn" id="prev" type="button">Back</button><button class="btn" id="skip" type="button">Skip</button></div>
+      <div><button class="btn primary" id="save" type="button" disabled>Save &amp; next ⏎</button></div>
+    </div>
+    <div class="status" id="status" role="status"></div>
+  </section>
+
+  <div class="help">
+    <span><code>space</code> play / replay · <code>1-9, 0, a-i</code> toggle a label · <code>⏎</code> save &amp; next · <code>←</code> back</span>
+    <span>Your answers autosave in this browser. To hand them in, click <b>Save labelled copy</b>: it downloads this same page with your labels inside. Send that file back.</span>
+  </div>
+</div>
+
+<script type="application/json" id="kit-clips">__CLIPS__</script>
+<script type="application/json" id="kit-groups">__GROUPS__</script>
+<script type="application/json" id="kit-answers">{}</script>
+<script>
+const KIT = "__KIT_ID__";
+const CLIPS = JSON.parse(document.getElementById("kit-clips").textContent);
+const GROUPS = JSON.parse(document.getElementById("kit-groups").textContent);
+const LABELS = GROUPS.flatMap(g => g[1]);
+const KEYS = "1234567890abcdefghi".split("");
+const HINT = {"oral sounds": "licking, lip smacks, wet mouth sounds (not kisses)", "background music": "any music under the sound"};
+const $ = id => document.getElementById(id);
+const store = (() => { try { const k = "__probe"; localStorage.setItem(k, "1"); localStorage.removeItem(k); return localStorage; } catch { return null; } })();
+
+// answers: embedded (from a saved copy) merged with this browser's autosave, newest per clip wins
+let saved = JSON.parse(document.getElementById("kit-answers").textContent || "{}");
+let answers = saved.answers || {};
+let local = {};
+try { local = JSON.parse(store && store.getItem("kit:" + KIT) || "{}"); } catch {}
+for (const [id, v] of Object.entries(local.answers || {})) if (!answers[id] || v.at > answers[id].at) answers[id] = v;
+$("who").value = local.who || saved.who || "";
+let idx = 0, sel = new Set(), playing = null;
+
+function persist() { try { store && store.setItem("kit:" + KIT, JSON.stringify({who: $("who").value, answers})); } catch {} }
+$("who").addEventListener("input", persist);
+
+let k = 0;
+for (const [name, labels] of GROUPS) {
+  const g = document.createElement("div"); g.className = "group"; g.textContent = name; $("chips").appendChild(g);
+  const grid = document.createElement("div"); grid.className = "chips";
+  for (const l of labels) {
+    const b = document.createElement("button"); b.className = "chip"; b.type = "button"; b.dataset.label = l;
+    b.setAttribute("aria-pressed", "false");
+    const kb = document.createElement("kbd"); kb.textContent = KEYS[k].toUpperCase();
+    const t = document.createElement("span"); t.textContent = l; if (HINT[l]) t.title = HINT[l];
+    b.append(kb, t); b.addEventListener("click", () => toggle(l)); grid.appendChild(b); k++;
+  }
+  $("chips").appendChild(grid);
+}
+function toggle(l) { sel.has(l) ? sel.delete(l) : sel.add(l); paint(); }
+function paint() {
+  document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", sel.has(c.dataset.label) ? "true" : "false"));
+  $("save").disabled = sel.size === 0;
+}
+function status(t, cls) { $("status").textContent = t; $("status").className = "status" + (cls ? " " + cls : ""); }
+const done = () => CLIPS.filter(c => answers[c.id]).length;
+function paintCount() {
+  $("count").innerHTML = `<b>${done()}</b> / ${CLIPS.length} labelled`;
+  $("bar").style.width = (100 * done() / CLIPS.length) + "%";
+}
+function setIcon(on) { $("icon").innerHTML = on ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>'; }
+function stop() { if (playing) { playing.a.pause(); cancelAnimationFrame(playing.raf); playing = null; } setIcon(false); }
+function play() {
+  if (playing) { stop(); return; }
+  const c = CLIPS[idx]; const a = new Audio(c.src);
+  a.play().then(() => {
+    setIcon(true);
+    const tick = () => {
+      $("prog").style.width = Math.min(100, 100 * a.currentTime / c.dur) + "%";
+      $("time").textContent = `${a.currentTime.toFixed(1)} / ${c.dur.toFixed(1)} s`;
+      if (a.ended || a.paused) { playing = null; setIcon(false); return; }
+      playing.raf = requestAnimationFrame(tick);
+    };
+    playing = {a, raf: requestAnimationFrame(tick)};
+  }).catch(() => status("Click play again: the browser blocked audio until you interact.", "warn"));
+}
+function show(i) {
+  stop(); idx = Math.max(0, Math.min(CLIPS.length - 1, i));
+  const c = CLIPS[idx], prev = answers[c.id];
+  sel = new Set(prev && prev.labels ? prev.labels : []); paint(); paintCount();
+  $("clipno").textContent = `clip ${idx + 1} of ${CLIPS.length}`;
+  $("time").textContent = `0.0 / ${c.dur.toFixed(1)} s`; $("prog").style.width = "0";
+  $("prev").disabled = idx === 0;
+  status(prev ? (prev.skipped ? "Skipped earlier." : "Labelled earlier. Change it and save again if you like.") : "");
+}
+function record(entry) {
+  const c = CLIPS[idx];
+  answers[c.id] = {labels: [...entry.labels], skipped: !!entry.skipped, at: Date.now()};
+  persist(); paintCount();
+  const next = CLIPS.findIndex((x, j) => j > idx && !answers[x.id]);
+  if (next === -1 && done() === CLIPS.length) { status("All clips labelled. Click “Save labelled copy” and send the file back.", "ok"); return; }
+  show(next === -1 ? idx + 1 : next); play();
+}
+$("play").addEventListener("click", play);
+$("save").addEventListener("click", () => sel.size && record({labels: sel}));
+$("skip").addEventListener("click", () => record({labels: new Set(), skipped: true}));
+$("prev").addEventListener("click", () => show(idx - 1));
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.id === "who") return;
+  const key = e.key.toLowerCase();
+  if (key === " ") { e.preventDefault(); play(); }
+  else if (key === "enter") { e.preventDefault(); if (sel.size) record({labels: sel}); }
+  else if (key === "arrowleft") show(idx - 1);
+  else { const j = KEYS.indexOf(key); if (j >= 0 && j < LABELS.length) toggle(LABELS[j]); }
+});
+
+// Save labelled copy: this same page, with the name and answers written into #kit-answers
+$("export").addEventListener("click", () => {
+  const who = $("who").value.trim();
+  if (!who) { status("Type your name first, so the labels can be credited.", "warn"); $("who").focus(); return; }
+  const payload = JSON.stringify({kit: KIT, who, saved_at: new Date().toISOString(), answers}).replace(/</g, "\\u003c");
+  const doc = document.documentElement.cloneNode(true);
+  doc.querySelector("#chips").innerHTML = "";          // rebuilt on load; would duplicate otherwise
+  doc.querySelector("#kit-answers").textContent = payload;
+  doc.querySelector("#status").textContent = "";
+  const html = "<!doctype html>\n" + doc.outerHTML;
+  const url = URL.createObjectURL(new Blob([html], {type: "text/html"}));
+  const a = document.createElement("a");
+  a.href = url; a.download = `asmr-ear-check_${who.replace(/[^\w-]+/g, "_")}_${done()}of${CLIPS.length}.html`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+  status(`Saved a copy with ${done()} labels. Send that downloaded file back.`, "ok");
+});
+
+const first = CLIPS.findIndex(c => !answers[c.id]);
+show(first === -1 ? 0 : first);
+if (done()) status(`Welcome back: ${done()} labelled, resuming at clip ${first === -1 ? 1 : first + 1}.`, "ok");
+</script>
+</body>
+</html>
