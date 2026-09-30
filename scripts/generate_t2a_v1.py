@@ -64,14 +64,56 @@ _ASR = None
 _norm = lambda w: re.sub(r"[^a-z']", "", w.lower())
 
 
-def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_pause: float = 0.7) -> tuple[np.ndarray, str]:
-    """Cut the chunk to [first word - 120 ms, the pause between its last real word and the look-ahead].
+def quietest(wav: np.ndarray, sr: int, t0: float, t1: float, win: float = 0.04) -> float | None:
+    """Centre (s) of the quietest `win` window inside [t0, t1]: where a cut or a pause can go without touching
+    a word. Whisper's word times are often 100-200 ms off, so edits are placed by the audio, not by them."""
+    a, b, w = int(max(0.0, t0) * sr), int(t1 * sr), int(win * sr)
+    if b - a < w: return None
+    hop = max(1, w // 2)
+    e = [(float(np.mean(wav[i:i + w] ** 2)), i + w // 2) for i in range(a, b - w, hop)]
+    return min(e)[1] / sr if e else None
 
-    An autoregressive TTS under-pronounces the final word of its input: it stops early ("brea-") or the word
-    mutates. So every chunk is generated with the next chunk's first words appended (look-ahead): the real last
-    word is never the sequence end and gets spoken fully. Whisper word timings, aligned to the expected words,
-    find the pause after the real last word; the cut goes midway through that pause and the look-ahead audio is
-    thrown away. The next chunk says those words for real."""
+
+def room_noise(wav: np.ndarray, sr: int, dur: float, level: float | None = None) -> np.ndarray:
+    """Room tone synthesised from the chunk's own quietest frames: random-offset, Hann-windowed overlap-add, so
+    nothing repeats (a looped slice is a 10 Hz buzz) and the spectrum is the room's, level-matched to `level`."""
+    n = int(dur * sr); w = int(0.05 * sr); hop = w // 2
+    frames = [wav[i:i + w] for i in range(0, max(1, len(wav) - w), hop)]
+    if n <= 0 or not frames: return np.zeros(max(0, n), np.float32)
+    e = np.array([np.mean(f ** 2) for f in frames])
+    pool = [f for f, x in zip(frames, e) if x <= np.percentile(e, 15)] or frames[:1]
+    rng = np.random.default_rng(n + len(wav)); win = np.hanning(w).astype(np.float32)
+    out = np.zeros(n + w, np.float32)
+    for k in range(0, n, hop):
+        out[k:k + w] += pool[rng.integers(len(pool))][:w] * win
+    out = out[:n]
+    target = level if level is not None else float(np.sqrt(np.mean(np.concatenate(pool) ** 2)))
+    return (out * (target / (float(np.sqrt(np.mean(out ** 2))) + 1e-12))).astype(np.float32)
+
+
+def xfade(a: np.ndarray, b: np.ndarray, sr: int, ms: float = 30) -> np.ndarray:
+    """Equal-power crossfade join: no click, no level dip at the seam."""
+    n = min(int(ms / 1000 * sr), len(a) // 2, len(b) // 2)
+    if n <= 0: return np.concatenate([a, b])
+    t = np.linspace(0, np.pi / 2, n, dtype=np.float32)
+    return np.concatenate([a[:-n], a[-n:] * np.cos(t) + b[:n] * np.sin(t), b[n:]]).astype(np.float32)
+
+
+def local_level(wav: np.ndarray, sr: int, t: float, span: float = 0.05) -> float:
+    seg = wav[max(0, int((t - span) * sr)): int((t + span) * sr)]
+    return float(np.sqrt(np.mean(seg ** 2))) if len(seg) else 0.0
+
+
+def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_pause: float = 0.5) -> tuple[np.ndarray, str]:
+    """Trim the chunk to its own words and enforce its pauses, with every edit in silence.
+
+    * look-ahead: the chunk was generated with the next chunk's first words appended, so its real last word is
+      spoken fully; the end cut goes at the quietest point between that word and the look-ahead
+    * the start cut goes at the quietest point before the first word -- or nowhere, if the chunk opens with a tag
+      (trimming to the first word cut the opening breath away)
+    * [pause Ns] is stretched to at least N s; a vocal event gets `event_pause` s of quiet after it -- inserted at
+      the quietest point in the latter part of the gap, i.e. after the event has decayed naturally, as room tone
+      built from the chunk's own background at the level around it"""
     global _ASR
     import difflib, librosa
     from faster_whisper import WhisperModel
@@ -81,94 +123,74 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
     if not words: return wav, "no words heard"
     real = [_norm(t) for t in TAG.sub(" ", text).split() if _norm(t)]
     la = [_norm(t) for t in lookahead if _norm(t)]
-    heard = [_norm(w.word) for w in words]
-    sm = difflib.SequenceMatcher(a=real + la, b=heard, autojunk=False)
+    sm = difflib.SequenceMatcher(a=real + la, b=[_norm(w.word) for w in words], autojunk=False)
     s2h = {}
     for blk in sm.get_matching_blocks():
         for k in range(blk.size): s2h[blk.a + k] = blk.b + k
-    jw = max((s2h[i] for i in range(len(real)) if i in s2h), default=None)          # last real word heard
-    jl = min((s2h[i] for i in range(len(real), len(real) + len(la)) if i in s2h), default=None)  # first look-ahead
+    jw = max((s2h[i] for i in range(len(real)) if i in s2h), default=None)
+    jl = min((s2h[i] for i in range(len(real), len(real) + len(la)) if i in s2h), default=None)
     if jw is None: return wav, "no script words matched"
-    end_w = words[jw].end
-    if jl is not None and jl > jw:
-        cut = max(end_w + 0.05, (end_w + words[jl].start) / 2)                         # middle of the pause
-    else:
-        cut = end_w + 0.3                                                              # look-ahead not spoken
     dropped = len(real) - 1 - max(i for i in range(len(real)) if i in s2h)
+    dur = len(wav) / sr
 
-    # where each tag sits: after real word prev_k, before real word next_k
     tags, k, pos = [], 0, 0
     for m in TAG.finditer(text):
         k += len([t for t in text[pos:m.start()].split() if _norm(t)])
         tags.append((m.group(1), float(m.group(2)) if m.group(2) else None, k - 1, k)); pos = m.end()
-    leading_tag = bool(tags) and tags[0][2] == -1
-    # a chunk that opens with an event keeps its opening audio: trimming to the first word cut the breath away
-    s0 = 0.0 if leading_tag else max(0.0, words[0].start - 0.12)
-    s1 = min(len(wav) / sr, cut)
+    if tags and tags[0][2] == -1:
+        s0 = 0.0
+    else:
+        w0 = words[0].start
+        s0 = quietest(wav, sr, w0 - 0.45, w0 - 0.08) or max(0.0, w0 - 0.25)
+    end_w = words[jw].end
+    hi = (words[jl].start - 0.05) if (jl is not None and jl > jw) else min(dur, end_w + 0.5)
+    s1 = min(dur, quietest(wav, sr, end_w + 0.05, hi) or end_w + 0.25)
 
-    # enforce pauses: [pause Ns] gets at least N s of quiet; every vocal event is followed by event_pause s of
-    # quiet before speech resumes, so a breath or moan never runs straight into the next sentence
-    inserts = []                                         # (time, seconds of quiet, exhale tail or None)
+    inserts = []
     for name, secs, prev_k, next_k in tags:
         if next_k not in s2h or next_k >= len(real): continue
         t_next = words[s2h[next_k]].start
         t_prev = words[s2h[prev_k]].end if prev_k >= 0 and prev_k in s2h else s0
         if name == "pause":
-            need = (secs or 0.0) - (t_next - t_prev); at = max(t_prev, t_next - 0.06)
-            if need > 0.08 and s0 <= at <= s1: inserts.append((at, need, None))
-            continue
-        tail = exhale_tail(wav, sr, t_prev, t_next) if name in ("moaning", "breathing") else None
-        if tail is not None:
-            at, x = tail                                 # the moan/breath releases into a slow exhale
-            inserts.append((at, max(0.0, event_pause - len(x) / sr), x))
+            need, lo = (secs or 0.0) - (t_next - t_prev), t_prev + 0.08
         else:
-            at = max(t_prev, t_next - 0.06)
-            if s0 <= at <= s1: inserts.append((at, event_pause, None))
-    frames = [wav[i:i + int(0.1 * sr)] for i in range(0, max(1, len(wav) - int(0.1 * sr)), int(0.1 * sr))]
-    tone = min(frames, key=lambda f: float(np.sqrt(np.mean(f ** 2)) if len(f) else 1.0)) if frames else np.zeros(int(0.1 * sr))
+            need, lo = event_pause, (t_prev + t_next) / 2        # after the event has decayed
+        at = quietest(wav, sr, lo, t_next - 0.12)
+        if need > 0.08 and at is not None and s0 < at < s1: inserts.append((at, need))
 
-    def quiet(dur):                                      # the chunk's own room tone, not digital silence
-        n = int(dur * sr); q = np.resize(tone, n).astype(np.float32)
-        f = min(int(0.02 * sr), n // 2)
-        if f: q[:f] *= np.linspace(0, 1, f); q[-f:] *= np.linspace(1, 0, f)
-        return q
-    parts, last = [], s0
-    for at, need, x in sorted(inserts, key=lambda r: r[0]):
-        parts.append(wav[int(last * sr): int(at * sr)])
-        if x is not None: parts.append(x)
-        if need > 0.05: parts.append(quiet(need))
-        last = at
-    parts.append(wav[int(last * sr): int(s1 * sr)])
-    out = np.concatenate(parts).astype(np.float32)
-    f = min(int(0.03 * sr), len(out) // 2)
-    if f: out[:f] *= np.linspace(0, 1, f); out[-f:] *= np.linspace(1, 0, f)
-    added = sum(n + (len(x) / sr if x is not None else 0) for _, n, x in inserts)
+    out, last = None, s0
+    for at, need in sorted(inserts):
+        seg = wav[int(last * sr): int(at * sr)]
+        gap = room_noise(wav, sr, need, local_level(wav, sr, at))
+        out = seg if out is None else xfade(out, seg, sr)
+        out = xfade(out, gap, sr); last = at
+    seg = wav[int(last * sr): int(s1 * sr)]
+    out = seg if out is None else xfade(out, seg, sr)
+    added = sum(n for _, n in inserts)
     note = "ok" if dropped <= 0 else f"model dropped the last {dropped} word(s)"
-    return out, note + (f", +{added:.1f}s enforced pauses" if added else "")
+    return out.astype(np.float32), note + (f", +{added:.1f}s enforced pauses" if added else "")
 
 
-def exhale_tail(wav: np.ndarray, sr: int, g0: float, g1: float, keep: float = 0.35, stretch: float = 2.5):
-    """A slow exhale after a moan or breath, made from the event's own ending (same voice, same room).
+BREATH_CUES = [(re.compile(r"\b(breathe in|breathing in|inhale|take a (deep |slow )?breath)\b", re.I), 4.0),
+               (re.compile(r"\bhold( it| that| your breath)?\b", re.I), 3.0),
+               (re.compile(r"\b(breathe out|breathing out|exhale|let it (all )?(out|go))\b", re.I), 5.0)]
 
-    Finds where the event's sound ends inside the gap [g0, g1], stretches its last `keep` seconds `stretch`x
-    (pitch-preserving) and fades that out, so the event releases instead of stopping dead. Returns
-    (time to insert at, audio) or None when the gap holds no clear event sound."""
-    import librosa
-    a, b = int(g0 * sr), int(g1 * sr)
-    if b - a < int(0.3 * sr): return None
-    seg = wav[a:b]; hop = int(0.02 * sr)
-    db = np.array([20 * np.log10(np.sqrt(np.mean(seg[i:i + hop] ** 2)) + 1e-9) for i in range(0, len(seg) - hop, hop)])
-    if not len(db) or db.max() < -50: return None
-    loud = np.where(db > max(-50.0, db.max() - 25))[0]
-    e = a + (loud[-1] + 1) * hop                         # end of the event's audible part
-    src = wav[max(a, e - int(keep * sr)): e].astype(np.float32)
-    if len(src) < int(0.1 * sr): return None
-    x = librosa.effects.time_stretch(src, rate=1.0 / stretch).astype(np.float32)
-    x *= np.linspace(1.0, 0.0, len(x)) ** 2              # decays like an out-breath
-    x *= 0.8                                             # a touch softer than the event itself
-    f = min(int(0.02 * sr), len(x) // 2)
-    if f: x[:f] *= np.linspace(0, 1, f)                  # no click at the join
-    return e / sr, x
+
+def add_breath_cues(script: str) -> str:
+    """Give the listener time to actually do what a breathing cue asks: ~4 s to inhale, ~3 s to hold, ~5 s to
+    release, after the clause that asks for it -- unless the script already put a pause there."""
+    parts = re.split(r"(?<=[,.!?…])\s+", " ".join(script.split()))
+    for i, c in enumerate(parts):
+        if c.rstrip().endswith("]"): continue
+        secs = next((sec for rx, sec in BREATH_CUES if rx.search(TAG.sub(" ", c))), None)
+        if secs is None: continue
+        nxt = parts[i + 1] if i + 1 < len(parts) else ""
+        m = re.match(r"\[pause ([\d.]+)s\]", nxt)
+        if m:                                             # the script already pauses here: at least the cue length
+            if float(m.group(1)) < secs: parts[i + 1] = f"[pause {secs:.1f}s]" + nxt[m.end():]
+        else:
+            parts[i] = f"{c} [pause {secs:.1f}s]"
+    return " ".join(parts)
 
 
 def load(device: str, adapter: str | None):
@@ -200,7 +222,8 @@ def main() -> int:
     ap.add_argument("--temperature", type=float, default=0.65, help="lower = fewer garbled/odd words")
     ap.add_argument("--cfg", type=float, default=0.3, help="lower = slower, more deliberate pacing")
     ap.add_argument("--exaggeration", type=float, default=0.35, help="lower = gentler, calmer delivery")
-    ap.add_argument("--event-pause", type=float, default=0.7, help="quiet seconds after each vocal event tag")
+    ap.add_argument("--event-pause", type=float, default=0.5, help="quiet seconds after each vocal event tag")
+    ap.add_argument("--no-breath-cues", action="store_true", help="don't add inhale/hold/exhale pauses after breathing cues")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-align-trim", action="store_true", help="skip word-aligned trimming of chunk edges")
     ap.add_argument("--gap-s", type=float, default=0.45, help="silence between chunks (words never touch a seam)")
@@ -211,6 +234,7 @@ def main() -> int:
     from chatterbox.models.t3.modules.cond_enc import T3Cond
 
     script = Path(a.script).read_text() if Path(a.script).exists() else a.script
+    if not a.no_breath_cues: script = add_breath_cues(script)
     chunks = plan(script, a.max_chunk_s)
     log(f"{len(chunks)} chunks, predicted {sum(predicted_s(c) for c in chunks):.0f} s")
     model = load(a.device, a.adapter or None)
@@ -241,7 +265,12 @@ def main() -> int:
             wav, note = align_trim(wav, sr, text, lookahead, a.event_pause)
         log(f"chunk {i + 1}/{len(chunks)}: {raw_s:.1f} s -> {len(wav) / sr:.1f} s ({note}; "
             f"predicted {predicted_s(text):.1f} s) in {time.time() - t0:.0f} s | {text[:70]}")
-        out += [wav, np.zeros(int(a.gap_s * sr), dtype=np.float32)]
+        # join through the previous chunk's own room tone at its closing level -- never digital silence
+        if not out: out = [wav]
+        else:
+            prev = out[-1]
+            gap = room_noise(prev, sr, a.gap_s, local_level(prev, sr, len(prev) / sr - 0.06))
+            out[-1] = xfade(xfade(prev, gap, sr), wav, sr)
         # continuation prompt from the *trimmed* tail, so a garbled last word never seeds the next chunk
         import librosa
         tail16 = librosa.resample(wav[-int(6 * sr):], orig_sr=sr, target_sr=16000)
