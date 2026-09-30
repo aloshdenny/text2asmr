@@ -146,29 +146,40 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
     hi = (words[jl].start - 0.05) if (jl is not None and jl > jw) else min(dur, end_w + 0.5)
     s1 = min(dur, quietest(wav, sr, end_w + 0.05, hi) or end_w + 0.25)
 
-    inserts = []
+    # edits: (cut_from, cut_to, room-tone seconds); cut_from == cut_to is a pure insert
+    edits, cleaned = [], 0
     for name, secs, prev_k, next_k in tags:
         if next_k not in s2h or next_k >= len(real): continue
         t_next = words[s2h[next_k]].start
         t_prev = words[s2h[prev_k]].end if prev_k >= 0 and prev_k in s2h else s0
         if name == "pause":
+            # long training pauses often held unlabelled mouth sounds, so the model can murmur through a pause;
+            # anything heard as words inside it that the script doesn't say is replaced by room tone
+            j0 = s2h[prev_k] if prev_k >= 0 and prev_k in s2h else -1
+            junk = words[j0 + 1: s2h[next_k]]
+            if junk:
+                a0 = quietest(wav, sr, t_prev + 0.05, junk[0].start - 0.03) or max(t_prev + 0.05, junk[0].start - 0.1)
+                b0 = quietest(wav, sr, junk[-1].end + 0.03, t_next - 0.12) or min(t_next - 0.12, junk[-1].end + 0.1)
+                if s0 < a0 < b0 < s1:
+                    edits.append((a0, b0, max(0.3, (secs or 0.0) - (a0 - t_prev) - (t_next - b0)))); cleaned += 1
+                    continue
             need, lo = (secs or 0.0) - (t_next - t_prev), t_prev + 0.08
         else:
             need, lo = event_pause, (t_prev + t_next) / 2        # after the event has decayed
         at = quietest(wav, sr, lo, t_next - 0.12)
-        if need > 0.08 and at is not None and s0 < at < s1: inserts.append((at, need))
+        if need > 0.08 and at is not None and s0 < at < s1: edits.append((at, at, need))
 
-    out, last = None, s0
-    for at, need in sorted(inserts):
-        seg = wav[int(last * sr): int(at * sr)]
-        gap = room_noise(wav, sr, need, local_level(wav, sr, at))
+    out, last, added = None, s0, 0.0
+    for a0, b0, fill in sorted(edits):
+        seg = wav[int(last * sr): int(a0 * sr)]
+        gap = room_noise(wav, sr, fill, min(local_level(wav, sr, a0), local_level(wav, sr, b0)))
         out = seg if out is None else xfade(out, seg, sr)
-        out = xfade(out, gap, sr); last = at
+        out = xfade(out, gap, sr); last = b0; added += fill - (b0 - a0)
     seg = wav[int(last * sr): int(s1 * sr)]
     out = seg if out is None else xfade(out, seg, sr)
-    added = sum(n for _, n in inserts)
     note = "ok" if dropped <= 0 else f"model dropped the last {dropped} word(s)"
-    return out.astype(np.float32), note + (f", +{added:.1f}s enforced pauses" if added else "")
+    if cleaned: note += f", {cleaned} murmured pause(s) cleaned"
+    return out.astype(np.float32), note + (f", {added:+.1f}s pause adjustment" if abs(added) > 0.05 else "")
 
 
 BREATH_CUES = [(re.compile(r"\b(breathe in|breathing in|inhale|take a (deep |slow )?breath)\b", re.I), 4.0),
