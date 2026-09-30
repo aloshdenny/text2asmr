@@ -64,7 +64,7 @@ _ASR = None
 _norm = lambda w: re.sub(r"[^a-z']", "", w.lower())
 
 
-def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str]) -> tuple[np.ndarray, str]:
+def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_pause: float = 0.7) -> tuple[np.ndarray, str]:
     """Cut the chunk to [first word - 120 ms, the pause between its last real word and the look-ahead].
 
     An autoregressive TTS under-pronounces the final word of its input: it stops early ("brea-") or the word
@@ -95,11 +95,45 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str]) -> tup
     else:
         cut = end_w + 0.3                                                              # look-ahead not spoken
     dropped = len(real) - 1 - max(i for i in range(len(real)) if i in s2h)
-    s0 = max(0.0, words[0].start - 0.12); s1 = min(len(wav) / sr, cut)
-    out = wav[int(s0 * sr): int(s1 * sr)].copy()
+
+    # where each tag sits: after real word prev_k, before real word next_k
+    tags, k, pos = [], 0, 0
+    for m in TAG.finditer(text):
+        k += len([t for t in text[pos:m.start()].split() if _norm(t)])
+        tags.append((m.group(1), float(m.group(2)) if m.group(2) else None, k - 1, k)); pos = m.end()
+    leading_tag = bool(tags) and tags[0][2] == -1
+    # a chunk that opens with an event keeps its opening audio: trimming to the first word cut the breath away
+    s0 = 0.0 if leading_tag else max(0.0, words[0].start - 0.12)
+    s1 = min(len(wav) / sr, cut)
+
+    # enforce pauses: [pause Ns] gets at least N s of quiet; every vocal event is followed by event_pause s of
+    # quiet before speech resumes, so a breath or moan never runs straight into the next sentence
+    inserts = []
+    for name, secs, prev_k, next_k in tags:
+        if next_k not in s2h or next_k >= len(real): continue
+        t_next = words[s2h[next_k]].start
+        t_prev = words[s2h[prev_k]].end if prev_k >= 0 and prev_k in s2h else s0
+        need = (secs - (t_next - t_prev)) if name == "pause" and secs else (event_pause if name != "pause" else 0.0)
+        at = max(t_prev, t_next - 0.06)
+        if need > 0.08 and s0 <= at <= s1: inserts.append((at, need))
+    frames = [wav[i:i + int(0.1 * sr)] for i in range(0, max(1, len(wav) - int(0.1 * sr)), int(0.1 * sr))]
+    tone = min(frames, key=lambda f: float(np.sqrt(np.mean(f ** 2)) if len(f) else 1.0)) if frames else np.zeros(int(0.1 * sr))
+
+    def quiet(dur):                                      # the chunk's own room tone, not digital silence
+        n = int(dur * sr); q = np.resize(tone, n).astype(np.float32)
+        f = min(int(0.02 * sr), n // 2)
+        if f: q[:f] *= np.linspace(0, 1, f); q[-f:] *= np.linspace(1, 0, f)
+        return q
+    parts, last = [], s0
+    for at, need in sorted(inserts):
+        parts += [wav[int(last * sr): int(at * sr)], quiet(need)]; last = at
+    parts.append(wav[int(last * sr): int(s1 * sr)])
+    out = np.concatenate(parts).astype(np.float32)
     f = min(int(0.03 * sr), len(out) // 2)
     if f: out[:f] *= np.linspace(0, 1, f); out[-f:] *= np.linspace(1, 0, f)
-    return out, ("ok" if dropped <= 0 else f"model dropped the last {dropped} word(s)")
+    added = sum(n for _, n in inserts)
+    note = "ok" if dropped <= 0 else f"model dropped the last {dropped} word(s)"
+    return out, note + (f", +{added:.1f}s enforced pauses" if added else "")
 
 
 def load(device: str, adapter: str | None):
@@ -128,9 +162,10 @@ def main() -> int:
     ap.add_argument("--adapter", default="aoxo/text2asmr-t3-v2", help="HF repo or local dir; '' for the base model")
     ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     ap.add_argument("--max-chunk-s", type=float, default=18.0)
-    ap.add_argument("--temperature", type=float, default=0.8)
+    ap.add_argument("--temperature", type=float, default=0.65, help="lower = fewer garbled/odd words")
     ap.add_argument("--cfg", type=float, default=0.3, help="lower = slower, more deliberate pacing")
-    ap.add_argument("--exaggeration", type=float, default=0.5)
+    ap.add_argument("--exaggeration", type=float, default=0.35, help="lower = gentler, calmer delivery")
+    ap.add_argument("--event-pause", type=float, default=0.7, help="quiet seconds after each vocal event tag")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-align-trim", action="store_true", help="skip word-aligned trimming of chunk edges")
     ap.add_argument("--gap-s", type=float, default=0.45, help="silence between chunks (words never touch a seam)")
@@ -168,7 +203,7 @@ def main() -> int:
         raw_s = len(wav) / sr
         note = "untrimmed"
         if not a.no_align_trim:
-            wav, note = align_trim(wav, sr, text, lookahead)
+            wav, note = align_trim(wav, sr, text, lookahead, a.event_pause)
         log(f"chunk {i + 1}/{len(chunks)}: {raw_s:.1f} s -> {len(wav) / sr:.1f} s ({note}; "
             f"predicted {predicted_s(text):.1f} s) in {time.time() - t0:.0f} s | {text[:70]}")
         out += [wav, np.zeros(int(a.gap_s * sr), dtype=np.float32)]
