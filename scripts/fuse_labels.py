@@ -26,7 +26,9 @@ LABELS = ["breathing", "kissing", "oral sounds", "moaning", "whispering", "norma
           "cutting", "background music", "silence / room tone", "something else"]
 V7 = ["breathing", "crinkling", "cutting", "fabric rustling", "microphone touching", "moaning", "oral sounds",
       "paper rustling", "scratching", "sticky", "tapping"]
-COVERS = {"pipeline": set(V7), "clap": {"breathing", "moaning", "oral sounds"}, "energy": {"silence / room tone"},
+CHAPTER = {"tapping", "brushing", "scratching", "liquid", "microphone touching", "crinkling", "sticky", "fabric rustling",
+           "paper rustling", "cutting", "oral sounds"}
+COVERS = {"pipeline": set(V7), "chapter": CHAPTER, "clap": {"breathing", "moaning", "oral sounds"}, "energy": {"silence / room tone"},
           "ast": {"breathing", "oral sounds", "moaning", "whispering", "normal speech", "tapping", "scratching", "crinkling",
                   "liquid", "fabric rustling", "paper rustling", "cutting", "background music", "silence / room tone",
                   "microphone touching"}}
