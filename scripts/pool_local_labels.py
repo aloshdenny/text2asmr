@@ -25,6 +25,17 @@ AST_MAP = {"breathing": ["Breathing", "Gasp", "Sigh", "Pant"], "oral sounds": ["
 def log(m): print(f"[{time.strftime('%F %T')}] {m}", flush=True)
 
 
+def load(f: str, sr: int) -> np.ndarray:
+    """Decode from bytes read by Python: clip names are full source paths and pass Windows' 260-char limit, which
+    libsndfile cannot open but Python can with the \\\\?\\ prefix."""
+    import io, os, librosa, soundfile as sf
+    p = os.path.abspath(f)
+    if os.name == "nt" and not p.startswith("\\\\?\\"): p = "\\\\?\\" + p
+    with open(p, "rb") as fh: data = fh.read()
+    y, s = sf.read(io.BytesIO(data), dtype="float32", always_2d=True)
+    return librosa.resample(y.mean(1), orig_sr=s, target_sr=sr) if s != sr else y.mean(1)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", type=Path, required=True)
@@ -51,7 +62,7 @@ def main() -> int:
     out = {k: open(a.pool / f"{k}.jsonl", "w", encoding="utf-8") for k in (["ast", "energy"] + (["clap"] if scorer else []))}
     for i in range(0, len(items), a.batch):
         b = items[i:i + a.batch]
-        wavs = [librosa.load(f, sr=16000)[0] for _, f in b]
+        wavs = [load(f, 16000) for _, f in b]
         with torch.no_grad():
             p = torch.sigmoid(m(**{k: v.to(dev) for k, v in fe(wavs, sampling_rate=16000, return_tensors="pt").items()}).logits).cpu().numpy()
         for (uid, f), x, pr in zip(b, wavs, p):
@@ -62,7 +73,7 @@ def main() -> int:
             out["energy"].write(json.dumps({"uid": uid, "labels": ["silence / room tone"] if np.percentile(db, 90) < -50 else [],
                                             "p90_db": round(float(np.percentile(db, 90)), 1)}) + "\n")
         if scorer:
-            w48 = np.stack([repeatpad(librosa.load(f, sr=48000)[0]) for _, f in b])
+            w48 = np.stack([repeatpad(load(f, 48000)) for _, f in b])
             for (uid, _), pc in zip(b, scorer(w48)):
                 top = classes[int(pc.argmax())]
                 out["clap"].write(json.dumps({"uid": uid, "labels": [] if top == "__bg__" else [top], "p": round(float(pc.max()), 3)}) + "\n")
