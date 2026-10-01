@@ -261,11 +261,37 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
     loud = fdb > float(np.percentile(fdb, 95)) - 15.0               # speech-level sound
 
     def after_speech(t0: float, t1: float) -> float:
-        """End of the last speech-level frame in [t0, t1] (t0 if none): a word tail the aligner missed ("rela|x":
-        it ended "relax" at "rela") still counts, so quiet before it is never taken for the pause."""
+        """End of the last speech-level frame in [t0, t1] (t0 if none)."""
         a, b = max(0, int(t0 * 100)), min(len(loud), int(t1 * 100))
         idx = np.where(loud[a:b])[0]
         return (a + idx[-1] + 1) / 100 if len(idx) else t0
+
+    def before_speech(t0: float, t1: float) -> float:
+        """Start of the first speech-level frame in [t0, t1] (t1 if none)."""
+        a, b = max(0, int(t0 * 100)), min(len(loud), int(t1 * 100))
+        idx = np.where(loud[a:b])[0]
+        return (a + idx[0]) / 100 if len(idx) else t1
+
+    def word_edges(t_prev: float, t_next: float) -> tuple[float, float]:
+        """Where the words around a gap really end/start. The aligner clips words: it ended "relax" at "rela"
+        (the "x" sits after it) and started "If" at the "f" (the "I" sits before it). Sound within 0.25 s after
+        a word is its tail, within 0.3 s before the next word its head -- a pause never goes inside either."""
+        tail = after_speech(t_prev, min(t_prev + 0.25, t_next))
+        return tail, max(tail, before_speech(max(tail, t_next - 0.30), t_next))
+
+    def strays(t0: float, t1: float) -> list[tuple[float, float]]:
+        """Short (< 0.3 s) speech-level sounds inside [t0, t1] that Whisper heard no word in: fragments the model
+        drops into pauses, which sound like a word cut off ("bu-") once the pause around them is stretched."""
+        a, b = max(0, int(t0 * 100)), min(len(loud), int(t1 * 100))
+        out, i = [], a
+        while i < b:
+            if loud[i]:
+                j = i
+                while j < b and (loud[j] or (j + 5 < b and loud[j:j + 5].any())): j += 1
+                if j - i < 30: out.append((i / 100, j / 100))
+                i = j
+            else: i += 1
+        return out
 
     def runs(t0: float, t1: float) -> list[tuple[float, float]]:
         """Quiet stretches (>= 30 ms) inside [t0, t1], as (start, end) seconds."""
@@ -281,12 +307,12 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
         return out
 
     gaps = gap_plan(text, sentence_pause, ellipsis_pause, breath_cues)
-    w0 = st[0]
+    w0 = before_speech(max(0.0, st[0] - 0.30), st[0])                  # include a head the aligner left out
     s0 = 0.0 if re.match(r"\s*\[", text) else (quietest(wav, sr, w0 - 0.45, w0 - 0.02) or max(0.0, w0 - 0.05))
     hi = (st[jl] - 0.02) if (jl is not None and jl > jw) else min(dur, en[jw] + 0.5)
-    end_w = after_speech(en[jw], hi)                                  # where the last word's sound really ends
-    tail = runs(end_w, hi)
-    s1 = min(dur, tail[0][0] + min(0.05, (tail[0][1] - tail[0][0]) / 2) if tail else hi)
+    end_w = after_speech(en[jw], min(hi, en[jw] + 0.25))              # where the last word's sound really ends
+    tail = [r for r in runs(end_w, hi) if r[1] - r[0] >= 0.15]       # a real pause, not a stop inside the word
+    s1 = min(dur, tail[0][0] + min(0.08, (tail[0][1] - tail[0][0]) / 2) if tail else hi)
 
     # edits: (cut_from, cut_to, room-tone seconds, crossfade ms); cut_from == cut_to is a pure insert
     edits, cleaned, missed = [], 0, 0
@@ -295,16 +321,17 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
         t_next = st[s2h[next_k]]
         t_prev = en[s2h[prev_k]] if prev_k >= 0 else s0
         if t_next <= t_prev: missed += 1; continue
-        q = runs(t_prev, t_next)
+        _, head = word_edges(t_prev, t_next)
+        q = runs(t_prev, head)
         if g["event"]:
             need = max(0.0, g["min"] - (t_next - t_prev)) + event_pause
-            last = q[-1] if q and q[-1][1] >= t_next - 0.05 else None          # quiet right up to the next word
+            last = q[-1] if q and q[-1][1] >= head - 0.05 else None            # quiet right up to the next word
             if last:
                 edits.append((last[0] + min(0.03, (last[1] - last[0]) / 2),) * 2 + (need, 60)); continue
             # the event runs into the next word: the pause goes before the event, in a real pause (>= 150 ms; a
             # shorter dip can be inside a drawn-out word), else just before the next word's onset
             first = next((r for r in q if r[1] - r[0] >= 0.15), None)
-            at = first[0] + 0.03 if first else t_next - 0.02
+            at = first[0] + 0.03 if first else head - 0.02
             edits.append((at, at, need, 60 if first else 15)); continue
         junk = words[(s2h[prev_k] if prev_k >= 0 else -1) + 1: s2h[next_k]]
         if junk:
@@ -316,20 +343,25 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
             if t_prev <= a_ < b_ <= t_next:
                 edits.append((a_, b_, max(0.3, g["min"] - (a_ - t_prev) - (t_next - b_)), 30)); cleaned += 1
                 continue
-        q = runs(after_speech(t_prev, t_next - 0.02), t_next)           # quiet after every bit of speech in the gap
+        tail, head = word_edges(t_prev, t_next)
+        for a_, b_ in strays(tail + 0.03, head - 0.03):                   # fragments in the pause -> room tone
+            a_, b_ = max(tail, a_ - 0.03), min(head, b_ + 0.05)
+            edits.append((a_, b_, b_ - a_, 30)); quiet[int(a_ * 100):int(b_ * 100)] = True; cleaned += 1
+        q = runs(tail, head)
         heard = max((b - a for a, b in q), default=0.0)
         need = g["min"] - heard
         if need <= 0.08: continue
         if q:
             a, b = max(q, key=lambda r: r[1] - r[0])
             at = quietest(wav, sr, a, b, win=min(0.04, b - a)) or (a + b) / 2
+            if any(x0 <= at <= x1 for x0, x1, _, _ in edits if x1 > x0): at = a + 0.02   # not inside a stray cut
             edits.append((at, at, need, 60))
         else:
-            edits.append((t_next - 0.02,) * 2 + (need, 15))                  # run together: just before the next word
+            edits.append((max(tail, head - 0.02),) * 2 + (need, 15))         # run together: just before the next word
 
     out, last, added = None, s0, 0.0
     for a0, b0, fill, ms in sorted(edits):
-        if not (s0 < a0 <= b0 < s1): missed += 1; continue
+        if not (s0 < a0 <= b0 < s1) or a0 < last: missed += 1; continue      # outside the trim, or overlapping
         if edit_log is not None:
             before = [w.word.strip() for w, e in zip(words, en) if e <= a0 + 0.01][-1:]
             after = [w.word.strip() for w, b in zip(words, st) if b >= b0 - 0.01][:1]
@@ -516,9 +548,9 @@ def assemble(pieces: list, chunks: list[str], sr: int, a, pauses: dict) -> np.nd
             gap = room_noise(out, sr, gap_s, tone_level(out, sr, len(out) / sr - 0.06))
             out = xfade(xfade(out, gap, sr, ms=60), wav, sr, ms=60)
     if not a.no_align_trim:
-        tail_s = min(5.0, end_pause(chunks[-1], **pauses)) - pieces[-1][2]
+        tail_s = max(3.0, min(5.0, end_pause(chunks[-1], **pauses))) - pieces[-1][2]   # room for a graceful fade-out
         if tail_s > 0.1:
-            fade = np.linspace(1.0, 0.0, int(tail_s * sr), dtype=np.float32) ** 2
+            fade = (0.5 + 0.5 * np.cos(np.linspace(0.0, np.pi, int(tail_s * sr)))).astype(np.float32)
             out = xfade(out, room_noise(out, sr, tail_s, tone_level(out, sr, len(out) / sr - 0.06)) * fade, sr, ms=60)
     return out
 
