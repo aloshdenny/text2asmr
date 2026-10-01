@@ -1,8 +1,8 @@
 # Detached job runner for the research server: the Windows stand-in for "tmux new -d".
-#   powershell -File D:\t2a\t2a_run.ps1 -Name <job> -Cmd "<python args>"
+#   powershell -File D:\t2a\t2a_run.ps1 -Name <job> -Cmd "<python args>" [-Py D:\t2a\venv-sao\Scripts\python.exe]
 # The job gets its own env (D:-only caches, the t2a venv), survives SSH disconnects (WMI-created, outside the
 # session's job object), and logs to D:\t2a\logs\<job>.log. One job per name: refuses if it is already running.
-param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Cmd)
+param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Cmd, [string]$Py = "python")
 New-Item -ItemType Directory -Force -Path D:\t2a\logs, D:\t2a\jobs | Out-Null
 $pidf = "D:\t2a\jobs\$Name.pid"
 if ((Test-Path $pidf) -and (Get-Process -Id (Get-Content $pidf) -ErrorAction SilentlyContinue)) { "job $Name already running (pid $(Get-Content $pidf))"; exit 1 }
@@ -15,7 +15,7 @@ set PYTHONPATH=D:\t2a\text2asmr& set PATH=D:\t2a\venv\Scripts;D:\t2a\bin;%PATH%
 for /f "usebackq delims=" %%L in ("D:\t2a\secrets.env") do set "%%L"
 cd /d D:\t2a\text2asmr
 echo [%date% %time%] START $Name >> D:\t2a\logs\$Name.log
-python $Cmd >> D:\t2a\logs\$Name.log 2>&1
+$Py $Cmd >> D:\t2a\logs\$Name.log 2>&1
 echo [%date% %time%] EXIT %ERRORLEVEL% >> D:\t2a\logs\$Name.log
 "@ | Set-Content -Encoding ASCII $wrap
 $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="cmd /c `"$wrap`""; CurrentDirectory="D:\t2a"}

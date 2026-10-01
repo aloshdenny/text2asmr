@@ -47,7 +47,7 @@ def main() -> int:
     from chatterbox.tts import ChatterboxTTS, punc_norm
     from chatterbox.models.t3.modules.cond_enc import T3Cond
 
-    recs = [json.loads(l) for l in open(a.pairs / "train_records.jsonl", encoding="utf-8")]
+    recs = [json.loads(l) for l in open(a.pairs / "train_records.jsonl", encoding="utf-8-sig") if l.strip()]
     toks = torch.load(a.pairs / "train_tokens.pt")
     pairs = []
     for r in recs:
