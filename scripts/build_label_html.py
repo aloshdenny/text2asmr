@@ -55,7 +55,7 @@ def main() -> int:
                         "-ac", "1", "-ar", "24000", "-b:a", "48k", str(mp3)], check=True)
         items.append({"id": cid, "dur": round(c["dur"], 2), "src": "data:audio/mpeg;base64," + base64.b64encode(mp3.read_bytes()).decode()})
     html = a.template.read_text()
-    html = html.replace("__KIT_ID__", a.kit_id).replace("__CLIPS__", json.dumps(items)).replace("__GROUPS__", json.dumps(LABEL_GROUPS))
+    html = html.replace("__KIT_ID__", a.kit_id).replace("__CLIPS__", json.dumps(items)).replace("__GROUPS__", json.dumps(LABEL_GROUPS)).replace("__GUIDE__", "[]")
     a.out.write_text(html)
     print(f"{len(items)} clips -> {a.out} ({a.out.stat().st_size / 1e6:.1f} MB); strata: "
           + ", ".join(f"{s}={sum(key[c]['stratum'] == s for c in picked)}" for s in order))

@@ -54,6 +54,12 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .status.warn{color:var(--warn)} .status.ok{color:var(--done)}
 .help{font-size:13px;color:var(--muted);display:grid;gap:4px}
 .help code{font:12px var(--mono)}
+details.guide{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+details.guide summary{cursor:pointer;font-weight:600}
+.guide-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px}
+.gitem{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--chip);display:grid;gap:6px}
+.gitem b{font-size:14px} .gitem p{margin:0;font-size:12px;color:var(--muted)}
+.gplay{display:flex;gap:6px} .gplay button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:4px 10px;font:12px var(--sans);cursor:pointer}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
 </head>
@@ -72,6 +78,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   </header>
   <div class="count" id="count"><b>0</b> / 0 labelled</div>
   <div class="bar" aria-hidden="true"><i id="bar"></i></div>
+
+  <details class="guide" id="guide" hidden>
+    <summary>Sound guide: what each label means (listen before you start)</summary>
+    <div class="guide-grid" id="guide-grid"></div>
+  </details>
 
   <section class="card" aria-label="Current clip">
     <div class="player">
@@ -98,6 +109,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 
 <script type="application/json" id="kit-clips">__CLIPS__</script>
 <script type="application/json" id="kit-groups">__GROUPS__</script>
+<script type="application/json" id="kit-guide">__GUIDE__</script>
 <script type="application/json" id="kit-answers">{}</script>
 <script>
 const KIT = "__KIT_ID__";
@@ -120,6 +132,25 @@ let idx = 0, sel = new Set(), playing = null;
 
 function persist() { try { store && store.setItem("kit:" + KIT, JSON.stringify({who: $("who").value, answers})); } catch {} }
 $("who").addEventListener("input", persist);
+
+// sound guide: reference clips per label, so every listener means the same thing by "crinkling" or "sticky"
+let GUIDE = [];
+try { GUIDE = JSON.parse(document.getElementById("kit-guide").textContent || "[]"); } catch {}
+if (GUIDE.length) {
+  $("guide").hidden = false;
+  for (const g of GUIDE) {
+    const d = document.createElement("div"); d.className = "gitem";
+    const b = document.createElement("b"); b.textContent = g.label;
+    const pp = document.createElement("p"); pp.textContent = g.hint || "";
+    const row = document.createElement("div"); row.className = "gplay";
+    g.clips.forEach((c, i) => {
+      const btn = document.createElement("button"); btn.type = "button"; btn.textContent = `▶ example ${i + 1}`;
+      btn.addEventListener("click", () => { stop(); const a = new Audio(c.src); a.play(); });
+      row.appendChild(btn);
+    });
+    d.append(b, pp, row); $("guide-grid").appendChild(d);
+  }
+}
 
 let k = 0;
 for (const [name, labels] of GROUPS) {
@@ -198,6 +229,7 @@ $("export").addEventListener("click", () => {
   const payload = JSON.stringify({kit: KIT, who, saved_at: new Date().toISOString(), answers}).replace(/</g, "\\u003c");
   const doc = document.documentElement.cloneNode(true);
   doc.querySelector("#chips").innerHTML = "";          // rebuilt on load; would duplicate otherwise
+  doc.querySelector("#guide-grid").innerHTML = "";
   doc.querySelector("#kit-answers").textContent = payload;
   doc.querySelector("#status").textContent = "";
   const html = "<!doctype html>\n" + doc.outerHTML;
