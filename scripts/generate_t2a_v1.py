@@ -94,6 +94,19 @@ def room_noise(wav: np.ndarray, sr: int, dur: float, level: float | None = None)
     return (out * (level / (float(np.sqrt(np.mean(out ** 2))) + 1e-12))).astype(np.float32)
 
 
+def clean_reference(path: str, dst: Path) -> str:
+    """Speech-enhance the reference clip (DeepFilterNet3) before cloning. The clone copies the reference's room
+    along with its voice: a 20 dB voice-to-room reference gave a -53 dB floor that had to be scrubbed afterwards
+    (heard as metallic tingling); the same voice cleaned to 56 dB clones at -93 dB with no output denoising."""
+    import librosa, soundfile as sf
+    from df.enhance import enhance, init_df
+    model, state, _ = init_df()
+    x, _ = librosa.load(path, sr=state.sr())
+    y = enhance(model, state, torch.from_numpy(x)[None]).squeeze(0).numpy()
+    sf.write(dst, librosa.resample(y, orig_sr=state.sr(), target_sr=24000), 24000)
+    return str(dst)
+
+
 def tempo(wav: np.ndarray, sr: int, factor: float) -> np.ndarray:
     """Change tempo without changing pitch (ffmpeg atempo). Applied to the finished piece, pauses included:
     per chunk, slowed audio would seed the next chunk's continuation prompt and the slowdown would compound."""
@@ -467,7 +480,9 @@ def main() -> int:
     ap.add_argument("--cfg", type=float, default=0.3, help="lower = slower, more deliberate pacing")
     ap.add_argument("--exaggeration", type=float, default=0.35, help="lower = gentler, calmer delivery")
     ap.add_argument("--rep-penalty", type=float, default=1.2, help="T3 repetition penalty (lower loops: measured)")
-    ap.add_argument("--denoise", type=float, default=0.8, help="noise-reduction strength (0 = off)")
+    ap.add_argument("--denoise", type=float, default=0.0,
+                    help="output noise reduction (0 = off; only for --no-clean-ref: it leaves metallic artifacts)")
+    ap.add_argument("--no-clean-ref", action="store_true", help="clone the reference as-is, room noise included")
     ap.add_argument("--gate", type=float, default=30.0, help="dB to pull the gaps between phrases down by (0 = off)")
     ap.add_argument("--speed", type=float, default=1.0, help="tempo of the finished piece, pitch kept (0.9 = 10%% slower)")
     ap.add_argument("--moan-exaggeration", type=float, default=None, help="exaggeration for chunks with moans (default: --exaggeration)")
@@ -506,14 +521,15 @@ def main() -> int:
     chunks = plan(script, a.max_chunk_s)
     log(f"{len(chunks)} chunks, predicted {sum(predicted_s(c) for c in chunks):.0f} s")
     model = load(a.device, a.adapter or None)
-    model.prepare_conditionals(a.ref, exaggeration=a.exaggeration)
+    takes_dir = Path(str(Path(a.out).with_suffix("")) + ".takes"); takes_dir.mkdir(parents=True, exist_ok=True)
+    ref = a.ref if a.no_clean_ref else clean_reference(a.ref, takes_dir / "ref_clean.wav")
+    model.prepare_conditionals(ref, exaggeration=a.exaggeration)
     base = model.conds.t3
     prompt = base.cond_prompt_speech_tokens[:, -PROMPT_TOKENS:]          # same prompt length as training
     hp = model.t3.hp
     pieces, sr = [], model.sr
     # every chosen take is kept raw, so a take worth keeping survives later changes to the post-processing
-    takes_dir = Path(str(Path(a.out).with_suffix("")) + ".takes"); takes_dir.mkdir(parents=True, exist_ok=True)
-    meta = {"script": script, "ref": a.ref, "adapter": a.adapter, "seed": a.seed, "chunks": []}
+    meta = {"script": script, "ref": a.ref, "clean_ref": not a.no_clean_ref, "adapter": a.adapter, "seed": a.seed, "chunks": []}
     TAIL = ["Okay", "then."]                                  # look-ahead for the final chunk; always cut off
     for i, text in enumerate(chunks):
         lookahead = (TAG.sub(" ", chunks[i + 1]).split()[:3] if i + 1 < len(chunks) else TAIL)
