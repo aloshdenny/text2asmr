@@ -42,10 +42,11 @@ def main() -> int:
     ap.add_argument("--clap", type=Path, default=None)
     ap.add_argument("--ast-thresh", type=float, default=0.1)
     ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--device", default="", help="cuda / cpu (default: cuda if free to use) -- cpu keeps off a busy GPU")
     a = ap.parse_args()
     import torch, librosa
     from transformers import ASTFeatureExtractor, ASTForAudioClassification
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    dev = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
     pool = [json.loads(l) for l in open(a.pool / "pool.jsonl", encoding="utf-8")]
     files = {Path(f).stem: f for f in glob.glob(str(a.pool / "pool_*" / "clips" / "*.mp3"))}
     items = [(p["uid"], files[re.sub(r"[^A-Za-z0-9_.-]", "_", p["uid"])]) for p in pool
