@@ -94,10 +94,20 @@ def room_noise(wav: np.ndarray, sr: int, dur: float, level: float | None = None)
     return (out * (level / (float(np.sqrt(np.mean(out ** 2))) + 1e-12))).astype(np.float32)
 
 
+def tempo(wav: np.ndarray, sr: int, factor: float) -> np.ndarray:
+    """Change tempo without changing pitch (ffmpeg atempo). Applied to the finished piece, pauses included:
+    per chunk, slowed audio would seed the next chunk's continuation prompt and the slowdown would compound."""
+    import subprocess
+    r = subprocess.run(["ffmpeg", "-v", "error", "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
+                        "-filter:a", f"atempo={factor}", "-f", "f32le", "pipe:1"],
+                       input=wav.astype(np.float32).tobytes(), capture_output=True, check=True)
+    return np.frombuffer(r.stdout, np.float32).copy()
+
+
 def denoise(wav: np.ndarray, sr: int, strength: float) -> np.ndarray:
-    """Stationary spectral gating: the clone copies the reference room's noise floor (~27 dB under the voice,
-    where clean ASMR has 40+). strength 0.8 lowers the floor ~14 dB with transcripts unchanged (measured);
-    stronger starts eating whispered speech."""
+    """Stationary spectral gating of the finished piece: the clone copies the reference room's noise floor (~27 dB
+    under the voice, where clean ASMR has 40+). strength 0.8 lowers the floor ~14 dB with transcripts unchanged
+    (measured); stronger starts eating whispered speech."""
     import noisereduce as nr
     return nr.reduce_noise(y=wav, sr=sr, stationary=True, prop_decrease=strength, n_fft=1024,
                            freq_mask_smooth_hz=300, time_mask_smooth_ms=60).astype(np.float32)
@@ -209,8 +219,8 @@ def word_spans(wav: np.ndarray, sr: int, words: list[str]) -> list[tuple[float, 
 
 
 def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_pause: float = 0.7,
-               sentence_pause: float = 0.9, ellipsis_pause: float = 1.4, breath_cues: bool = True
-               ) -> tuple[np.ndarray, str, float, float]:
+               sentence_pause: float = 0.9, ellipsis_pause: float = 1.4, breath_cues: bool = True,
+               edit_log: list | None = None) -> tuple[np.ndarray, str, float, float]:
     """Trim the chunk to its own words and give every gap the quiet it needs -- never cutting into a word.
 
     Words are heard by Whisper and timed by forced alignment (word_spans). Every edit lies strictly between
@@ -248,6 +258,14 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
 
     h = int(0.01 * sr); fdb = 20 * np.log10(np.sqrt((wav[: len(wav) // h * h].reshape(-1, h) ** 2).mean(1)) + 1e-9)
     quiet = fdb < float(np.percentile(fdb, 10)) + 10.0
+    loud = fdb > float(np.percentile(fdb, 95)) - 15.0               # speech-level sound
+
+    def after_speech(t0: float, t1: float) -> float:
+        """End of the last speech-level frame in [t0, t1] (t0 if none): a word tail the aligner missed ("rela|x":
+        it ended "relax" at "rela") still counts, so quiet before it is never taken for the pause."""
+        a, b = max(0, int(t0 * 100)), min(len(loud), int(t1 * 100))
+        idx = np.where(loud[a:b])[0]
+        return (a + idx[-1] + 1) / 100 if len(idx) else t0
 
     def runs(t0: float, t1: float) -> list[tuple[float, float]]:
         """Quiet stretches (>= 30 ms) inside [t0, t1], as (start, end) seconds."""
@@ -265,9 +283,10 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
     gaps = gap_plan(text, sentence_pause, ellipsis_pause, breath_cues)
     w0 = st[0]
     s0 = 0.0 if re.match(r"\s*\[", text) else (quietest(wav, sr, w0 - 0.45, w0 - 0.02) or max(0.0, w0 - 0.05))
-    end_w = en[jw]
-    hi = (st[jl] - 0.02) if (jl is not None and jl > jw) else min(dur, end_w + 0.5)
-    s1 = min(dur, quietest(wav, sr, end_w + 0.02, hi) or min(dur, end_w + 0.1))
+    hi = (st[jl] - 0.02) if (jl is not None and jl > jw) else min(dur, en[jw] + 0.5)
+    end_w = after_speech(en[jw], hi)                                  # where the last word's sound really ends
+    tail = runs(end_w, hi)
+    s1 = min(dur, tail[0][0] + min(0.05, (tail[0][1] - tail[0][0]) / 2) if tail else hi)
 
     # edits: (cut_from, cut_to, room-tone seconds, crossfade ms); cut_from == cut_to is a pure insert
     edits, cleaned, missed = [], 0, 0
@@ -297,6 +316,7 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
             if t_prev <= a_ < b_ <= t_next:
                 edits.append((a_, b_, max(0.3, g["min"] - (a_ - t_prev) - (t_next - b_)), 30)); cleaned += 1
                 continue
+        q = runs(after_speech(t_prev, t_next - 0.02), t_next)           # quiet after every bit of speech in the gap
         heard = max((b - a for a, b in q), default=0.0)
         need = g["min"] - heard
         if need <= 0.08: continue
@@ -305,11 +325,16 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
             at = quietest(wav, sr, a, b, win=min(0.04, b - a)) or (a + b) / 2
             edits.append((at, at, need, 60))
         else:
-            edits.append(((t_prev + t_next) / 2,) * 2 + (need, 15))           # run together: at the boundary
+            edits.append((t_next - 0.02,) * 2 + (need, 15))                  # run together: just before the next word
 
     out, last, added = None, s0, 0.0
     for a0, b0, fill, ms in sorted(edits):
         if not (s0 < a0 <= b0 < s1): missed += 1; continue
+        if edit_log is not None:
+            before = [w.word.strip() for w, e in zip(words, en) if e <= a0 + 0.01][-1:]
+            after = [w.word.strip() for w, b in zip(words, st) if b >= b0 - 0.01][:1]
+            edit_log.append({"at": round(a0, 3), "cut_to": round(b0, 3), "room_tone_s": round(fill, 2),
+                             "between": before + after})
         seg = wav[int(last * sr): int(a0 * sr)]
         gap = room_noise(wav, sr, fill, tone_level(wav, sr, a0, b0))
         out = seg if out is None else xfade(out, seg, sr, ms=ms)
@@ -369,8 +394,10 @@ def load(device: str, adapter: str | None):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ref", required=True, help="reference voice clip (6-12 s of clean speech)")
-    ap.add_argument("--script", required=True, help="text file, or the script itself")
+    ap.add_argument("--ref", help="reference voice clip (6-12 s of clean speech)")
+    ap.add_argument("--script", help="text file, or the script itself")
+    ap.add_argument("--restitch", type=Path, default=None,
+                    help="a <out>.takes dir from an earlier render: re-stitch its saved takes, no model, no new takes")
     ap.add_argument("--out", required=True)
     ap.add_argument("--adapter", default="aoxo/text2asmr-t3-v2", help="HF repo or local dir; '' for the base model")
     ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
@@ -379,7 +406,8 @@ def main() -> int:
     ap.add_argument("--cfg", type=float, default=0.3, help="lower = slower, more deliberate pacing")
     ap.add_argument("--exaggeration", type=float, default=0.35, help="lower = gentler, calmer delivery")
     ap.add_argument("--rep-penalty", type=float, default=1.2, help="T3 repetition penalty (lower loops: measured)")
-    ap.add_argument("--denoise", type=float, default=0.8, help="noise-reduction strength per chunk (0 = off)")
+    ap.add_argument("--denoise", type=float, default=0.8, help="noise-reduction strength (0 = off)")
+    ap.add_argument("--speed", type=float, default=1.0, help="tempo of the finished piece, pitch kept (0.9 = 10%% slower)")
     ap.add_argument("--moan-exaggeration", type=float, default=None, help="exaggeration for chunks with moans (default: --exaggeration)")
     ap.add_argument("--moan-temperature", type=float, default=None, help="temperature for chunks with moans (default: --temperature)")
     ap.add_argument("--event-pause", type=float, default=0.7, help="quiet seconds after each vocal event tag")
@@ -392,6 +420,21 @@ def main() -> int:
     ap.add_argument("--no-align-trim", action="store_true", help="skip word-aligned trimming of chunk edges")
     ap.add_argument("--gap-s", type=float, default=0.45, help="quiet between chunks when no pause is asked for")
     a = ap.parse_args()
+    import json, soundfile as sf
+    pauses = dict(sentence_pause=a.sentence_pause, ellipsis_pause=a.ellipsis_pause, breath_cues=not a.no_breath_cues)
+    if a.restitch:                                           # re-stitch saved takes with the current post-processing
+        meta = json.loads((a.restitch / "takes.json").read_text())
+        chunks, pieces = [c["text"] for c in meta["chunks"]], []
+        for i, c in enumerate(meta["chunks"]):
+            raw, sr = sf.read(a.restitch / c["file"], dtype="float32")
+            if a.no_align_trim: pieces.append((raw, 0.0, 0.0)); continue
+            wav, note, lead, trail = align_trim(raw, sr, c["text"], c["lookahead"], a.event_pause, **pauses)
+            log(f"chunk {i + 1}/{len(chunks)} (saved take {c['take'] + 1}): {len(raw) / sr:.1f} s -> {len(wav) / sr:.1f} s ({note})")
+            pieces.append((wav, lead, trail))
+        import perth
+        finish(assemble(pieces, chunks, sr, a, pauses), sr, a, perth.PerthImplicitWatermarker())
+        return 0
+    if not (a.ref and a.script): ap.error("--ref and --script are required unless --restitch is given")
     torch.manual_seed(a.seed)
     import torch.nn.functional as F
     from chatterbox.tts import punc_norm, drop_invalid_tokens
@@ -405,10 +448,11 @@ def main() -> int:
     base = model.conds.t3
     prompt = base.cond_prompt_speech_tokens[:, -PROMPT_TOKENS:]          # same prompt length as training
     hp = model.t3.hp
-    out, sr = [], model.sr
+    pieces, sr = [], model.sr
+    # every chosen take is kept raw, so a take worth keeping survives later changes to the post-processing
+    takes_dir = Path(str(Path(a.out).with_suffix("")) + ".takes"); takes_dir.mkdir(parents=True, exist_ok=True)
+    meta = {"script": script, "ref": a.ref, "adapter": a.adapter, "seed": a.seed, "chunks": []}
     TAIL = ["Okay", "then."]                                  # look-ahead for the final chunk; always cut off
-    pauses = dict(sentence_pause=a.sentence_pause, ellipsis_pause=a.ellipsis_pause, breath_cues=not a.no_breath_cues)
-    trail = 0.0
     for i, text in enumerate(chunks):
         lookahead = (TAG.sub(" ", chunks[i + 1]).split()[:3] if i + 1 < len(chunks) else TAIL)
         gen_text = text if a.no_align_trim else f"{text} {' '.join(lookahead)}"
@@ -430,50 +474,64 @@ def main() -> int:
                 st = model.t3.inference(t3_cond=cond, text_tokens=tt, max_new_tokens=520, temperature=temp,
                                         cfg_weight=a.cfg, repetition_penalty=a.rep_penalty, min_p=0.05, top_p=1.0)[0]
                 st = drop_invalid_tokens(st); st = st[st < 6561].to(model.device)
-                wav, _ = model.s3gen.inference(speech_tokens=st, ref_dict=model.conds.gen)
-            wav = wav.squeeze(0).detach().cpu().numpy()
-            raw_s = len(wav) / sr
-            if a.denoise > 0: wav = denoise(wav, sr, a.denoise)
-            note, lead, new_trail = "untrimmed", 0.0, 0.0
+                raw, _ = model.s3gen.inference(speech_tokens=st, ref_dict=model.conds.gen)
+            raw = raw.squeeze(0).detach().cpu().numpy()
+            wav, note, lead, new_trail, edits = raw, "untrimmed", 0.0, 0.0, []
             if not a.no_align_trim:
-                wav, note, lead, new_trail = align_trim(wav, sr, text, lookahead, a.event_pause, **pauses)
+                wav, note, lead, new_trail = align_trim(raw, sr, text, lookahead, a.event_pause, **pauses, edit_log=edits)
             errs = script_errors(wav, sr, text) if a.candidates > 1 else 0
-            if best is None or errs < best[0]: best = (errs, j, wav, note, lead, new_trail, raw_s)
+            if best is None or errs < best[0]: best = (errs, j, wav, note, lead, new_trail, raw, edits)
             if errs == 0 or (j + 1 >= a.candidates and best[0] <= 1): break
-        errs, j, wav, note, lead, new_trail, raw_s = best
+        errs, j, wav, note, lead, new_trail, raw, edits = best
         pick = f", candidate {j + 1} ({errs} word errors)" if a.candidates > 1 else ""
-        log(f"chunk {i + 1}/{len(chunks)}: {raw_s:.1f} s -> {len(wav) / sr:.1f} s ({note}{', moan settings' if moan else ''}{pick}; "
+        log(f"chunk {i + 1}/{len(chunks)}: {len(raw) / sr:.1f} s -> {len(wav) / sr:.1f} s ({note}{', moan settings' if moan else ''}{pick}; "
             f"predicted {predicted_s(text):.1f} s) in {time.time() - t0:.0f} s | {text[:70]}")
-        # join through the previous chunk's own room tone at its closing level -- never digital silence; the
-        # quiet the previous chunk's last word asks for (sentence end, breathing cue) carries across the seam
-        if not out: out = [wav]
-        else:
-            prev = out[-1]
-            want = 0.0 if re.match(r"\s*\[pause", text) else end_pause(chunks[i - 1], **pauses)
-            gap_s = max(0.15, want - trail - lead) if want else a.gap_s
-            gap = room_noise(prev, sr, gap_s, tone_level(prev, sr, len(prev) / sr - 0.06))
-            out[-1] = xfade(xfade(prev, gap, sr, ms=60), wav, sr, ms=60)
-        if not a.no_align_trim: trail = new_trail
-        if i == len(chunks) - 1 and not a.no_align_trim:
-            # the closing line's pause (e.g. 5 s to exhale after "and out.") as room tone, fading out
-            tail_s = min(5.0, end_pause(text, **pauses)) - trail
-            if tail_s > 0.1:
-                fade = np.linspace(1.0, 0.0, int(tail_s * sr), dtype=np.float32) ** 2
-                out[-1] = xfade(out[-1], room_noise(out[-1], sr, tail_s, tone_level(out[-1], sr, len(out[-1]) / sr - 0.06)) * fade, sr, ms=60)
-        # continuation prompt from the *trimmed* tail, so a garbled last word never seeds the next chunk
+        sf.write(takes_dir / f"chunk{i:02d}.wav", raw, sr, subtype="PCM_16")
+        meta["chunks"].append({"file": f"chunk{i:02d}.wav", "text": text, "lookahead": lookahead, "take": j,
+                               "word_errors": errs, "moan_settings": moan, "edits": edits})
+        pieces.append((wav, lead, new_trail))
+        # continuation prompt from the *trimmed* chunk, so a garbled last word never seeds the next chunk
         import librosa
         tail16 = librosa.resample(wav[-int(6 * sr):], orig_sr=sr, target_sr=16000)
         with torch.inference_mode():
             pt, pl = model.s3gen.tokenizer.forward([tail16])
         if int(pl[0]) >= PROMPT_TOKENS:
             prompt = pt[:, :int(pl[0])][:, -PROMPT_TOKENS:].long().to(model.device)
-    audio = np.concatenate(out)
-    audio = model.watermarker.apply_watermark(audio, sample_rate=sr)
-    import soundfile as sf
-    sf.write(a.out, audio, sr)
-    log(f"wrote {a.out}: {len(audio) / sr:.1f} s")
+    (takes_dir / "takes.json").write_text(json.dumps(meta, indent=1))
+    finish(assemble(pieces, chunks, sr, a, pauses), sr, a, model.watermarker)
     return 0
 
+
+def assemble(pieces: list, chunks: list[str], sr: int, a, pauses: dict) -> np.ndarray:
+    """Join trimmed chunks (wav, quiet before first word, quiet after last word) through room tone -- never
+    digital silence. The quiet the previous chunk's last word asks for (sentence end, breathing cue) carries
+    across the seam; the closing line's pause (e.g. 5 s to exhale after "and out.") is room tone fading out."""
+    out = None
+    for i, (wav, lead, trail) in enumerate(pieces):
+        if out is None: out = wav
+        else:
+            ptrail = pieces[i - 1][2]
+            want = 0.0 if re.match(r"\s*\[pause", chunks[i]) else end_pause(chunks[i - 1], **pauses)
+            gap_s = max(0.15, want - ptrail - lead) if want else a.gap_s
+            gap = room_noise(out, sr, gap_s, tone_level(out, sr, len(out) / sr - 0.06))
+            out = xfade(xfade(out, gap, sr, ms=60), wav, sr, ms=60)
+    if not a.no_align_trim:
+        tail_s = min(5.0, end_pause(chunks[-1], **pauses)) - pieces[-1][2]
+        if tail_s > 0.1:
+            fade = np.linspace(1.0, 0.0, int(tail_s * sr), dtype=np.float32) ** 2
+            out = xfade(out, room_noise(out, sr, tail_s, tone_level(out, sr, len(out) / sr - 0.06)) * fade, sr, ms=60)
+    return out
+
+
+def finish(audio: np.ndarray, sr: int, a, watermarker) -> None:
+    import soundfile as sf
+    if a.speed != 1.0: audio = tempo(audio, sr, a.speed)
+    # denoise once, after stitching: inserted room tone and the real floor get the same gating, so the quiet
+    # never switches texture between them (denoising chunks first made inserted pauses stand out)
+    if a.denoise > 0: audio = denoise(audio, sr, a.denoise)
+    audio = watermarker.apply_watermark(audio, sample_rate=sr)
+    sf.write(a.out, audio, sr)
+    log(f"wrote {a.out}: {len(audio) / sr:.1f} s")
 
 if __name__ == "__main__":
     raise SystemExit(main())
