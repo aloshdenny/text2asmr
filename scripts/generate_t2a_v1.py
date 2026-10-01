@@ -104,6 +104,27 @@ def tempo(wav: np.ndarray, sr: int, factor: float) -> np.ndarray:
     return np.frombuffer(r.stdout, np.float32).copy()
 
 
+def gate(audio: np.ndarray, sr: int, depth_db: float, above_db: float = 12.0, hold_s: float = 0.15) -> np.ndarray:
+    """Quiet the gaps, not the voice: frames more than `above_db` over the room floor (speech, breaths, moans) and
+    `hold_s` around them pass untouched; everything else drops `depth_db`. Denoising alone left a steady hiss in
+    every pause on noisy references (heard as "white noise monotonics"); a dry reference sits at ~-94 dB and
+    sounds silent between phrases -- this makes the others do the same. Gain moves smoothly (10 ms up, 120 ms
+    down) and the hold reaches past word edges, so onsets and soft tails are never clipped."""
+    h = int(0.01 * sr); n = len(audio) // h
+    if n < 10: return audio
+    db = 20 * np.log10(np.sqrt((audio[: n * h].reshape(n, h) ** 2).mean(1)) + 1e-9)
+    act = db > np.percentile(db, 10) + above_db
+    k = int(hold_s / 0.01)
+    act = np.convolve(act.astype(float), np.ones(2 * k + 1), "same") > 0
+    tgt = np.where(act, 1.0, 10 ** (-depth_db / 20))
+    g, up, down = np.empty(n), 1 - np.exp(-1 / 1.0), 1 - np.exp(-1 / 12.0)    # one-pole, per 10 ms frame
+    cur = tgt[0]
+    for i in range(n):
+        cur += (tgt[i] - cur) * (up if tgt[i] > cur else down); g[i] = cur
+    gain = np.interp(np.arange(len(audio)), np.arange(n) * h + h / 2, g)
+    return (audio * gain).astype(np.float32)
+
+
 def denoise(wav: np.ndarray, sr: int, strength: float) -> np.ndarray:
     """Stationary spectral gating of the finished piece: the clone copies the reference room's noise floor (~27 dB
     under the voice, where clean ASMR has 40+). strength 0.8 lowers the floor ~14 dB with transcripts unchanged
@@ -383,20 +404,28 @@ def align_trim(wav: np.ndarray, sr: int, text: str, lookahead: list[str], event_
 FILLERS = {"mm", "mmm", "mmmm", "hmm", "hm", "mhm", "oh", "ohh", "ah", "ahh", "uh", "um", "huh"}
 
 
-def script_errors(wav: np.ndarray, sr: int, text: str) -> int:
+_ASR_M = None
+
+
+def script_errors(wav: np.ndarray, sr: int, text: str, careful: bool = False) -> int:
     """Word edits between the script and what is heard in a trimmed chunk; vocal-event noises Whisper writes as
     "mm" / "oh" are not counted (they are the events), repeated or invented words are."""
     import difflib, librosa
-    global _ASR
-    if _ASR is None:
-        from faster_whisper import WhisperModel
-        _ASR = WhisperModel("small.en", device="cpu", compute_type="int8")
+    global _ASR, _ASR_M
+    from faster_whisper import WhisperModel
+    if _ASR is None: _ASR = WhisperModel("small.en", device="cpu", compute_type="int8")
+    # moan chunks are heard with medium.en: small.en writes a laugh off as silence, medium hears "hahaha"
+    if careful and _ASR_M is None: _ASR_M = WhisperModel("medium.en", device="cpu", compute_type="int8")
     w16 = librosa.resample(wav, orig_sr=sr, target_sr=16000)
-    heard = [_norm(w.word) for seg in _ASR.transcribe(w16, language="en", word_timestamps=True)[0] for w in (seg.words or [])]
+    heard = [_norm(w.word) for seg in (_ASR_M if careful else _ASR).transcribe(w16, language="en", word_timestamps=True)[0]
+             for w in (seg.words or [])]
     heard = [w for w in heard if w and w not in FILLERS]
     real = [_norm(t) for t in TAG.sub(" ", text).split() if _norm(t)]
+    # a laugh the script doesn't ask for is worse than a wrong word: the user heard v1.1 laughs as fake
+    laughs = 0 if re.search(r"laugh|\bha", text, re.I) else sum(bool(re.fullmatch(r"(ha|he|hah|heh)+h?", w)) for w in heard)
+    heard = [w for w in heard if not re.fullmatch(r"(ha|he|hah|heh)+h?", w)]
     ops = difflib.SequenceMatcher(a=real, b=heard, autojunk=False).get_opcodes()
-    return sum(max(i2 - i1, j2 - j1) for op, i1, i2, j1, j2 in ops if op != "equal")
+    return sum(max(i2 - i1, j2 - j1) for op, i1, i2, j1, j2 in ops if op != "equal") + 3 * laughs
 
 
 def end_pause(text: str, sentence_pause: float, ellipsis_pause: float, breath_cues: bool) -> float:
@@ -439,6 +468,7 @@ def main() -> int:
     ap.add_argument("--exaggeration", type=float, default=0.35, help="lower = gentler, calmer delivery")
     ap.add_argument("--rep-penalty", type=float, default=1.2, help="T3 repetition penalty (lower loops: measured)")
     ap.add_argument("--denoise", type=float, default=0.8, help="noise-reduction strength (0 = off)")
+    ap.add_argument("--gate", type=float, default=30.0, help="dB to pull the gaps between phrases down by (0 = off)")
     ap.add_argument("--speed", type=float, default=1.0, help="tempo of the finished piece, pitch kept (0.9 = 10%% slower)")
     ap.add_argument("--moan-exaggeration", type=float, default=None, help="exaggeration for chunks with moans (default: --exaggeration)")
     ap.add_argument("--moan-temperature", type=float, default=None, help="temperature for chunks with moans (default: --temperature)")
@@ -511,7 +541,9 @@ def main() -> int:
             wav, note, lead, new_trail, edits = raw, "untrimmed", 0.0, 0.0, []
             if not a.no_align_trim:
                 wav, note, lead, new_trail = align_trim(raw, sr, text, lookahead, a.event_pause, **pauses, edit_log=edits)
-            errs = script_errors(wav, sr, text) if a.candidates > 1 else 0
+            # score what the listener will hear: denoised (a laugh only stood out to Whisper once the hiss was gone)
+            heard = denoise(wav, sr, a.denoise) if a.denoise > 0 else wav
+            errs = script_errors(heard, sr, text, careful=moan) if a.candidates > 1 else 0
             if best is None or errs < best[0]: best = (errs, j, wav, note, lead, new_trail, raw, edits)
             if errs == 0 or (j + 1 >= a.candidates and best[0] <= 1): break
         errs, j, wav, note, lead, new_trail, raw, edits = best
@@ -561,6 +593,7 @@ def finish(audio: np.ndarray, sr: int, a, watermarker) -> None:
     # denoise once, after stitching: inserted room tone and the real floor get the same gating, so the quiet
     # never switches texture between them (denoising chunks first made inserted pauses stand out)
     if a.denoise > 0: audio = denoise(audio, sr, a.denoise)
+    if a.gate > 0: audio = gate(audio, sr, a.gate)
     audio = watermarker.apply_watermark(audio, sample_rate=sr)
     sf.write(a.out, audio, sr)
     log(f"wrote {a.out}: {len(audio) / sr:.1f} s")
