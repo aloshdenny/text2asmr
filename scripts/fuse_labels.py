@@ -78,7 +78,7 @@ def arrays(votes, uids, labellers):
     return A
 
 
-def fit(A, humans, has_human, human_prior=10.0, unlabelled_weight=1.0, iters=30, shrink=0.0, pooled=None):
+def fit(A, humans, has_human, human_prior=10.0, unlabelled_weight=1.0, iters=30, shrink=0.0, pooled=None, crowd_prior=3.0):
     """Per class: prior + (sensitivity, specificity) per labeller, by EM. People get Beta pseudo-counts that say
     "reliable" (sens 0.8, spec 0.95, strength --human-prior); machines start flat. Clips no person labelled count
     `unlabelled_weight` toward the rates: Gemini and MiMo make correlated mistakes, and with full weight their
@@ -102,7 +102,9 @@ def fit(A, humans, has_human, human_prior=10.0, unlabelled_weight=1.0, iters=30,
                 tp = np.sum(c * post * yes); fp = np.sum(c * (1 - post) * yes)
                 fn = np.sum(c * post * ~yes); tn = np.sum(c * (1 - post) * ~yes)
                 if l in humans:
-                    k = human_prior; tp += 0.8 * k; fn += 0.2 * k; tn += 0.95 * k; fp += 0.05 * k
+                    # Ear Check site listeners ("crowd:<name>") are strangers: a weak prior, so trust comes from the
+                    # control clips and agreement, not from being a person
+                    k = crowd_prior if l.startswith("crowd:") else human_prior; tp += 0.8 * k; fn += 0.2 * k; tn += 0.95 * k; fp += 0.05 * k
                 elif shrink and pooled and l in pooled:
                     se0, sp0 = pooled[l]; tp += se0 * shrink; fn += (1 - se0) * shrink; tn += sp0 * shrink; fp += (1 - sp0) * shrink
                 rates[l] = ((tp + 1) / (tp + fn + 2), (tn + 1) / (tn + fp + 2))
@@ -122,10 +124,10 @@ def pooled_rates(model, humans):
     return {l: (a[0] / a[1], a[2] / a[3]) for l, a in acc.items() if a[1] > 0 and a[3] > 0}
 
 
-def fit_shrunk(A, humans, has_human, human_prior, unlabelled_weight, shrink):
-    m = fit(A, humans, has_human, human_prior, unlabelled_weight)
+def fit_shrunk(A, humans, has_human, human_prior, unlabelled_weight, shrink, crowd_prior=3.0):
+    m = fit(A, humans, has_human, human_prior, unlabelled_weight, crowd_prior=crowd_prior)
     if not shrink: return m
-    return fit(A, humans, has_human, human_prior, unlabelled_weight, shrink=shrink, pooled=pooled_rates(m, humans))
+    return fit(A, humans, has_human, human_prior, unlabelled_weight, shrink=shrink, pooled=pooled_rates(m, humans), crowd_prior=crowd_prior)
 
 
 def posterior(L, prior, rates, n):
@@ -146,6 +148,7 @@ def main() -> int:
     ap.add_argument("--human-prior", type=float, default=10.0)
     ap.add_argument("--cv-against", default="", help="5-fold: hide this person's labels on a fold, score the fusion against them")
     ap.add_argument("--unlabelled-weight", type=float, default=0.0, help="weight of clips no person labelled, in the rates")
+    ap.add_argument("--crowd-prior", type=float, default=3.0, help="reliability pseudo-counts for crowd:<name> listeners (site labels)")
     ap.add_argument("--shrink", type=float, default=20.0, help="pseudo-counts pulling a machine's per-class rates to its overall rates (CV: precision vs Ryyan 38% -> 44%, F1 flat)")
     a = ap.parse_args()
     votes = load_votes(a.pool, a.votes)
@@ -167,7 +170,7 @@ def main() -> int:
         for k in range(5):
             test = set(A[k::5]); saved = {u: votes[u].pop(who) for u in test}
             AR = arrays(votes, uids, labellers); hh = np.array([any(h in votes[u] for h in humans) for u in uids])
-            m = fit_shrunk(AR, humans, hh, a.human_prior, a.unlabelled_weight, a.shrink)
+            m = fit_shrunk(AR, humans, hh, a.human_prior, a.unlabelled_weight, a.shrink, a.crowd_prior)
             post = {lab: posterior(AR[lab], m[lab][0], m[lab][1], len(uids)) for lab in LABELS}
             for u in test: P[u] = {lab for lab in LABELS if post[lab][ix[u]] > 0.5}
             for u, v in saved.items(): votes[u][who] = v
@@ -181,7 +184,7 @@ def main() -> int:
             pr, rc, f1 = score({u: (votes[u].get(l) or set()) for u in A}); print(f"{l:12} {pr:4.0%} {rc:6.0%} {f1:5.2f}")
 
     AR = arrays(votes, uids, labellers); hh = np.array([any(h in votes[u] for h in humans) for u in uids])
-    m = fit_shrunk(AR, humans, hh, a.human_prior, a.unlabelled_weight, a.shrink)
+    m = fit_shrunk(AR, humans, hh, a.human_prior, a.unlabelled_weight, a.shrink, a.crowd_prior)
     post = {lab: posterior(AR[lab], m[lab][0], m[lab][1], len(uids)) for lab in LABELS}
     with open(a.out, "w", encoding="utf-8") as fh:
         for i, u in enumerate(uids):
