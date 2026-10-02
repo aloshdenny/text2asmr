@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../components/Layouts'
 import { Alert, Button, Field, Input, PasswordInput } from '../components/ui'
 import { useAuth } from '../lib/auth'
-import { supabase } from '../lib/supabase'
+import { friendlyError, supabase } from '../lib/supabase'
 
 export default function Login() {
   const { session, loading } = useAuth()
@@ -27,7 +27,7 @@ export default function Login() {
       const { data: status } = await supabase.rpc('account_status', { p_email: addr })
       setBusy(false)
       if (status === 'unclaimed') return setUnclaimed(true)
-      return setError(error.message === 'Invalid login credentials' ? 'Wrong email or password.' : error.message)
+      return setError(error.message === 'Invalid login credentials' ? 'Wrong email or password.' : friendlyError(error.message))
     }
     setBusy(false)
     navigate('/dashboard')

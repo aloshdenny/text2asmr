@@ -40,3 +40,10 @@ export function dayKey(d: Date): string {
 }
 
 export const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+
+/** Errors people can act on: a server or network failure reads as one, not as "HTTP 503" or "Failed to fetch". */
+export function friendlyError(message: string): string {
+  if (/^HTTP 5\d\d$|failed to fetch|networkerror|load failed|not configured/i.test(message))
+    return 'Can’t reach ASMR Board right now. Please try again in a moment.'
+  return message
+}

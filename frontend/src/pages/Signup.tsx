@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthLayout } from '../components/Layouts'
 import { Alert, Button, Field, Input, PasswordInput } from '../components/ui'
 import { useAuth } from '../lib/auth'
-import { supabase } from '../lib/supabase'
+import { friendlyError, supabase } from '../lib/supabase'
 
 export default function Signup() {
   const { session, loading, refreshProfile } = useAuth()
@@ -24,7 +24,7 @@ export default function Signup() {
     const { data, error } = await supabase.auth.signUp({ email: email.trim(), password })
     setBusy(false)
     if (error) {
-      return setError(/already registered|already exists/i.test(error.message) ? 'There’s already an account for this email — log in instead.' : error.message)
+      return setError(/already registered|already exists/i.test(error.message) ? 'There’s already an account for this email — log in instead.' : friendlyError(error.message))
     }
     if (!data.session) return setSent(true) // the project asks new accounts to confirm their email first
     // signing up with a kit labeller's email claims their profile (and labels) on the way in

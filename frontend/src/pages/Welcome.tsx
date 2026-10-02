@@ -5,7 +5,7 @@ import { AuthLayout } from '../components/Layouts'
 import { Alert, Button, Field, Input, Loading } from '../components/ui'
 import { useAuth, type Profile } from '../lib/auth'
 import { useUserStats } from '../lib/stats'
-import { supabase } from '../lib/supabase'
+import { friendlyError, supabase } from '../lib/supabase'
 
 const USERNAME = /^[a-z0-9_]{3,20}$/
 
@@ -42,7 +42,7 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
       ? await supabase.from('profiles').update({ ...fields, onboarded: true }).eq('id', uid)
       : await supabase.from('profiles').insert({ id: uid, ...fields })
     setBusy(false)
-    if (error) return setError(error.code === '23505' ? 'That username is taken — try another.' : error.message)
+    if (error) return setError(error.code === '23505' ? 'That username is taken — try another.' : friendlyError(error.message))
     await refreshProfile()
     navigate('/dashboard', { replace: true })
   }

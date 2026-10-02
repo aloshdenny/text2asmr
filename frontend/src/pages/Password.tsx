@@ -4,7 +4,7 @@ import type { EmailOtpType } from '@supabase/supabase-js'
 import { AuthLayout } from '../components/Layouts'
 import { Alert, Button, ButtonLink, Field, Input, Loading, PasswordInput } from '../components/ui'
 import { useAuth } from '../lib/auth'
-import { supabase } from '../lib/supabase'
+import { friendlyError, supabase } from '../lib/supabase'
 
 /** Ask for a reset link (needs working email delivery on the project). */
 export function ForgotPassword() {
@@ -17,7 +17,7 @@ export function ForgotPassword() {
     setBusy(true)
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim())
     setBusy(false)
-    if (error) setError(error.message)
+    if (error) setError(friendlyError(error.message))
     else setSent(true)
   }
   return (
