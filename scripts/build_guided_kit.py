@@ -33,8 +33,10 @@ HINTS = {"tapping": "fingertips or nails tapping a surface: short, separate taps
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fused", type=Path, required=True)
-    ap.add_argument("--votes", type=Path, required=True, help="dir with chapter.jsonl and gemini.jsonl")
+    ap.add_argument("--fused", type=Path, default=None)
+    ap.add_argument("--votes", type=Path, default=None, help="dir with chapter.jsonl and gemini.jsonl")
+    ap.add_argument("--plan", type=Path, default=None,
+                    help="a planned kit {guide: [{label, hint, uids}], clips: [{uid, stratum}]}: build it as given, no selection")
     ap.add_argument("--clips", type=Path, required=True, help="mp3 clips named by sanitized uid")
     ap.add_argument("--n-per-class", type=int, default=13)
     ap.add_argument("--guide-per-class", type=int, default=2)
@@ -44,6 +46,7 @@ def main() -> int:
     ap.add_argument("--exclude", type=Path, nargs="*", default=[], help="label files whose uids may not be guide examples (e.g. a listener said the example was wrong)")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
+    if a.plan: return build_plan(a)
     F = {json.loads(l)["uid"]: json.loads(l)["probs"] for l in open(a.fused, encoding="utf-8")}
     ch = {json.loads(l)["uid"]: json.loads(l)["labels"] for l in open(a.votes / "chapter.jsonl", encoding="utf-8")}
     gem = {json.loads(l)["uid"]: set(json.loads(l)["labels"]) for l in open(a.votes / "gemini.jsonl", encoding="utf-8")}
@@ -76,6 +79,22 @@ def main() -> int:
     from collections import Counter
     print(f"{len(items)} clips to label, guide for {len(guide)} classes -> {a.out} ({a.out.stat().st_size / 1e6:.1f} MB)")
     print("per class:", dict(Counter(lab for _, lab in picks)), "| guide:", [g["label"] for g in guide])
+    return 0
+
+
+def build_plan(a) -> int:
+    plan = json.loads(a.plan.read_text())
+    path = lambda u: a.clips / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', u)}.mp3"
+    b64 = lambda u: "data:audio/mpeg;base64," + base64.b64encode(path(u).read_bytes()).decode()
+    guide = [{"label": g["label"], "hint": g.get("hint", HINTS.get(g["label"], "")), "clips": [{"src": b64(u), "dur": 6.0} for u in g["uids"]]}
+             for g in plan["guide"]]
+    items = [{"id": f"q{i:04d}", "dur": 6.0, "src": b64(c["uid"])} for i, c in enumerate(plan["clips"])]
+    key = [{"id": f"q{i:04d}", "uid": c["uid"], "stratum": c["stratum"]} for i, c in enumerate(plan["clips"])]
+    tpl = (Path(__file__).with_name("label_kit_template.html")).read_text()
+    a.out.write_text(tpl.replace("__KIT_ID__", a.kit_id).replace("__CLIPS__", json.dumps(items))
+                        .replace("__GROUPS__", json.dumps(LABEL_GROUPS)).replace("__GUIDE__", json.dumps(guide)))
+    a.out.with_suffix(".key.jsonl").write_text("".join(json.dumps(k) + "\n" for k in key))
+    print(f"{len(items)} clips, guide for {len(guide)} classes -> {a.out} ({a.out.stat().st_size / 1e6:.1f} MB)")
     return 0
 
 

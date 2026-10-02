@@ -59,6 +59,9 @@ details.guide summary{cursor:pointer;font-weight:600}
 .guide-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px}
 .gitem{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--chip);display:grid;gap:6px}
 .gitem b{font-size:14px} .gitem p{margin:0;font-size:12px;color:var(--muted)}
+.other{display:grid;gap:6px}
+.other label{font-size:13px;color:var(--muted)}
+.other input{font:14px var(--sans);padding:8px 10px;border:1px solid var(--accent);border-radius:8px;background:var(--surface);color:var(--ink)}
 .gplay{display:flex;gap:6px} .gplay button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:6px;padding:4px 10px;font:12px var(--sans);cursor:pointer}
 @media (prefers-reduced-motion:reduce){.bar i{transition:none}}
 </style>
@@ -94,6 +97,10 @@ details.guide summary{cursor:pointer;font-weight:600}
     </div>
     <p class="q">Pick everything that is clearly present, then save. More than one is fine.</p>
     <div id="chips"></div>
+    <div class="other" id="other-wrap" hidden>
+      <label for="other">"Something else": what do you hear? (a few words)</label>
+      <input id="other" type="text" maxlength="120" placeholder="e.g. spraying, clicking a pen, rain, a cat purring">
+    </div>
     <div class="actions">
       <div><button class="btn" id="prev" type="button">Back</button><button class="btn" id="skip" type="button">Skip</button></div>
       <div><button class="btn primary" id="save" type="button" disabled>Save &amp; next ⏎</button></div>
@@ -102,7 +109,7 @@ details.guide summary{cursor:pointer;font-weight:600}
   </section>
 
   <div class="help">
-    <span><code>space</code> play / replay · <code>1-9, 0, a-i</code> toggle a label · <code>⏎</code> save &amp; next · <code>←</code> back</span>
+    <span><code>space</code> play / replay · <code>1-9, 0, a-j</code> toggle a label · <code>⏎</code> save &amp; next · <code>←</code> back</span>
     <span>Your answers autosave in this browser. To hand them in, click <b>Save labelled copy</b>: it downloads this same page with your labels inside. Send that file back.</span>
   </div>
 </div>
@@ -116,7 +123,7 @@ const KIT = "__KIT_ID__";
 const CLIPS = JSON.parse(document.getElementById("kit-clips").textContent);
 const GROUPS = JSON.parse(document.getElementById("kit-groups").textContent);
 const LABELS = GROUPS.flatMap(g => g[1]);
-const KEYS = "1234567890abcdefghi".split("");
+const KEYS = "1234567890abcdefghijklmnop".split("");   // more than enough for the label menu
 const HINT = {"oral sounds": "licking, lip smacks, wet mouth sounds (not kisses)", "background music": "any music under the sound"};
 const $ = id => document.getElementById(id);
 const store = (() => { try { const k = "__probe"; localStorage.setItem(k, "1"); localStorage.removeItem(k); return localStorage; } catch { return null; } })();
@@ -169,6 +176,9 @@ function toggle(l) { sel.has(l) ? sel.delete(l) : sel.add(l); paint(); }
 function paint() {
   document.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", sel.has(c.dataset.label) ? "true" : "false"));
   $("save").disabled = sel.size === 0;
+  const wasHidden = $("other-wrap").hidden;
+  $("other-wrap").hidden = !sel.has("something else");
+  if (wasHidden && !$("other-wrap").hidden) $("other").focus();
 }
 function status(t, cls) { $("status").textContent = t; $("status").className = "status" + (cls ? " " + cls : ""); }
 const done = () => CLIPS.filter(c => answers[c.id]).length;
@@ -195,7 +205,7 @@ function play() {
 function show(i) {
   stop(); idx = Math.max(0, Math.min(CLIPS.length - 1, i));
   const c = CLIPS[idx], prev = answers[c.id];
-  sel = new Set(prev && prev.labels ? prev.labels : []); paint(); paintCount();
+  sel = new Set(prev && prev.labels ? prev.labels : []); $("other").value = (prev && prev.other) || ""; paint(); paintCount();
   $("clipno").textContent = `clip ${idx + 1} of ${CLIPS.length}`;
   $("time").textContent = `0.0 / ${c.dur.toFixed(1)} s`; $("prog").style.width = "0";
   $("prev").disabled = idx === 0;
@@ -204,6 +214,7 @@ function show(i) {
 function record(entry) {
   const c = CLIPS[idx];
   answers[c.id] = {labels: [...entry.labels], skipped: !!entry.skipped, at: Date.now()};
+  if (entry.labels.has && entry.labels.has("something else") && $("other").value.trim()) answers[c.id].other = $("other").value.trim();
   persist(); paintCount();
   const next = CLIPS.findIndex((x, j) => j > idx && !answers[x.id]);
   if (next === -1 && done() === CLIPS.length) { status("All clips labelled. Click “Save labelled copy” and send the file back.", "ok"); return; }
@@ -215,6 +226,7 @@ $("skip").addEventListener("click", () => record({labels: new Set(), skipped: tr
 $("prev").addEventListener("click", () => show(idx - 1));
 document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.target.id === "who") return;
+  if (e.target.id === "other") { if (e.key === "Enter") { e.preventDefault(); if (sel.size) record({labels: sel}); } return; }
   const key = e.key.toLowerCase();
   if (key === " ") { e.preventDefault(); play(); }
   else if (key === "enter") { e.preventDefault(); if (sel.size) record({labels: sel}); }
