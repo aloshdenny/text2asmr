@@ -11,6 +11,7 @@ export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const path = url.searchParams.get('__p') ?? ''
   url.searchParams.delete('__p')
+  url.searchParams.delete('sbpath') // Vercel also passes the rewrite's route segment as a query parameter
   if (!ALLOWED.test(path)) return new Response('not found', { status: 404 })
   const base = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_ANON_KEY
