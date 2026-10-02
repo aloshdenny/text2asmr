@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Avatar from '../components/Avatar'
 import { AppLayout } from '../components/Layouts'
-import { ButtonLink, Card, CardHeader, Stat } from '../components/ui'
+import { ButtonLink, Card, CardHeader, Stat, cx } from '../components/ui'
 import { useAuth } from '../lib/auth'
 import { useLeaderboard } from '../lib/stats'
 import { supabase } from '../lib/supabase'
@@ -10,8 +10,8 @@ import { supabase } from '../lib/supabase'
 type Stats = { labels: number; labellers: number; clips: number; clips_complete: number }
 
 const STEPS = [
-  ['Listen', 'One six-second clip at a time. Headphones help.'],
-  ['Tick what you hear', 'Whispers, tapping, crinkles, brushing — usually more than one.'],
+  ['Listen', 'One short clip at a time. Headphones help.'],
+  ['Tick what you hear', 'Whispers, tapping, crinkles, brushing. Usually more than one.'],
   ['Stay independent', 'Every clip goes to several listeners, and nobody sees anyone else’s answer.'],
 ]
 
@@ -35,19 +35,20 @@ export default function Home() {
         </p>
         <div className="mt-7 flex flex-wrap gap-2.5">
           {signedIn ? (
-            <ButtonLink to="/label" variant="primary" size="lg">Start labelling</ButtonLink>
+            <>
+              <ButtonLink to="/label" variant="primary" size="lg">Start labelling</ButtonLink>
+              <ButtonLink to="/guide" size="lg">Hear the sound guide</ButtonLink>
+            </>
           ) : (
             <ButtonLink to="/signup" variant="primary" size="lg">Create an account</ButtonLink>
           )}
-          <ButtonLink to="/guide" size="lg">Hear the sound guide</ButtonLink>
         </div>
-        <p className="mt-4 text-xs text-ink-muted">18+ only — some clips contain intimate vocal sounds.</p>
+        <p className="mt-4 text-xs text-ink-muted">18+ only. Some clips contain intimate vocal sounds.</p>
       </section>
 
-      <section className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat value={n(stats?.labels)} label="labels given" />
+      <section className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Stat value={n(stats?.labels)} label="clips labelled" />
         <Stat value={n(stats?.labellers)} label="listeners" />
-        <Stat value={n(stats?.clips_complete)} label="clips fully labelled" />
         <Stat value={n(stats?.clips)} label="clips in the queue" />
       </section>
 
@@ -68,16 +69,22 @@ export default function Home() {
         </Card>
         <Card>
           <CardHeader title="Top listeners" description="Last 30 days" action={<Link to="/leaderboard" className="text-sm text-brand hover:underline">All</Link>} />
-          {top && top.length === 0 && <p className="text-sm text-ink-muted">No labels yet — be the first.</p>}
+          {top && top.length === 0 && <p className="text-sm text-ink-muted">No labels yet. Be the first.</p>}
           <ol className="divide-y divide-hairline">
-            {(top ?? []).map((r) => (
-              <li key={r.username} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                <span className="w-4 text-right font-mono text-xs text-ink-muted">{r.rank}</span>
-                <Avatar name={r.username} url={r.avatar_url} size={24} />
-                <Link to={`/u/${r.username}`} className="min-w-0 flex-1 truncate text-sm text-ink hover:underline">{r.display_name || r.username}</Link>
-                <span className="font-mono text-sm tabular-nums text-ink-secondary">{r.labelled.toLocaleString()}</span>
-              </li>
-            ))}
+            {(top ?? []).map((r) => {
+              const me = profile?.username === r.username
+              return (
+                <li key={r.username} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <span className="w-4 text-right font-mono text-xs text-ink-muted">{r.rank}</span>
+                  <Avatar name={r.username} url={r.avatar_url} size={24} />
+                  <Link to={`/u/${r.username}`} className={cx('min-w-0 flex-1 truncate text-sm text-ink hover:underline', me && 'font-medium')}>
+                    {r.username}
+                    {me && <span className="ml-1 text-ink-muted">(You)</span>}
+                  </Link>
+                  <span className="font-mono text-sm tabular-nums text-ink-secondary">{r.labelled.toLocaleString()}</span>
+                </li>
+              )
+            })}
           </ol>
         </Card>
       </section>

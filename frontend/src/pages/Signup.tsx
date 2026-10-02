@@ -24,7 +24,7 @@ export default function Signup() {
     const { data, error } = await supabase.auth.signUp({ email: email.trim(), password })
     setBusy(false)
     if (error) {
-      return setError(/already registered|already exists/i.test(error.message) ? 'There’s already an account for this email — log in instead.' : friendlyError(error.message))
+      return setError(/already registered|already exists/i.test(error.message) ? 'There’s already an account for this email. Log in instead.' : friendlyError(error.message))
     }
     if (!data.session) return setSent(true) // the project asks new accounts to confirm their email first
     // signing up with a kit labeller's email claims their profile (and labels) on the way in

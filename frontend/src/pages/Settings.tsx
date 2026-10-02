@@ -32,11 +32,11 @@ function SettingsForm({ profile, uid }: { profile: Profile; uid: string }) {
   const saveNames = async (e: FormEvent) => {
     e.preventDefault()
     const u = username.trim().toLowerCase()
-    if (!USERNAME.test(u)) return setMsg({ ok: false, text: 'Usernames are 3–20 characters: lowercase letters, digits and _.' })
+    if (!USERNAME.test(u)) return setMsg({ ok: false, text: 'Usernames are 3 to 20 characters: lowercase letters, digits and _.' })
     setBusy(true)
     const { error } = await supabase.from('profiles').update({ username: u, display_name: displayName.trim() || null }).eq('id', uid)
     setBusy(false)
-    if (error) return setMsg({ ok: false, text: error.code === '23505' ? 'That username is taken — try another.' : error.message })
+    if (error) return setMsg({ ok: false, text: error.code === '23505' ? 'That username is taken. Try another.' : error.message })
     await refreshProfile()
     setMsg({ ok: true, text: 'Saved.' })
   }
@@ -66,7 +66,7 @@ function SettingsForm({ profile, uid }: { profile: Profile; uid: string }) {
         <Card>
           <CardHeader title="Name" />
           <form onSubmit={saveNames} className="space-y-4">
-            <Field label="Username" htmlFor="username" hint="3–20 characters: lowercase letters, digits and _.">
+            <Field label="Username" htmlFor="username" hint="3 to 20 characters: lowercase letters, digits and _.">
               <Input id="username" required maxLength={20} autoCapitalize="none" spellCheck={false} value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} />
             </Field>
             <Field label={<>Display name <span className="font-normal text-ink-muted">(optional)</span></>} htmlFor="display">
@@ -82,7 +82,7 @@ function SettingsForm({ profile, uid }: { profile: Profile; uid: string }) {
         <Card>
           <CardHeader
             title="Delete account"
-            description="Removes your sign-in and takes you off the leaderboard and profile pages. The clips you labelled stay in the dataset, without your name. This can’t be undone."
+            description="Removes your login and takes you off the leaderboard and profile pages. The clips you labelled stay in the dataset, without your name. This can’t be undone."
           />
           <div className="space-y-3">
             <Field label={<>Type <span className="font-mono">{profile.username}</span> to confirm</>} htmlFor="confirm">

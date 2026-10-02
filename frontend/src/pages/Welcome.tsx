@@ -34,7 +34,7 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
     e.preventDefault()
     setError('')
     const u = username.trim().toLowerCase()
-    if (!USERNAME.test(u)) return setError('Usernames are 3–20 characters: lowercase letters, digits and _.')
+    if (!USERNAME.test(u)) return setError('Usernames are 3 to 20 characters: lowercase letters, digits and _.')
     if (!adult) return setError('You need to be 18 or older to label these clips.')
     setBusy(true)
     const fields = { username: u, display_name: displayName.trim() || null, avatar_url: avatar }
@@ -42,7 +42,7 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
       ? await supabase.from('profiles').update({ ...fields, onboarded: true }).eq('id', uid)
       : await supabase.from('profiles').insert({ id: uid, ...fields })
     setBusy(false)
-    if (error) return setError(error.code === '23505' ? 'That username is taken — try another.' : friendlyError(error.message))
+    if (error) return setError(error.code === '23505' ? 'That username is taken. Try another.' : friendlyError(error.message))
     await refreshProfile()
     navigate('/dashboard', { replace: true })
   }
@@ -60,7 +60,7 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
               : 'This is how you appear on the leaderboard.'}
           </p>
         </div>
-        <Field label="Username" htmlFor="username" hint="3–20 characters: lowercase letters, digits and _.">
+        <Field label="Username" htmlFor="username" hint="3 to 20 characters: lowercase letters, digits and _.">
           <Input id="username" required maxLength={20} autoCapitalize="none" spellCheck={false} value={username} placeholder="quiet_ears" onChange={(e) => setUsername(e.target.value.toLowerCase())} />
         </Field>
         <Field label={<>Display name <span className="font-normal text-ink-muted">(optional)</span></>} htmlFor="display">

@@ -55,7 +55,7 @@ export default function Dashboard() {
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat value={(stats?.labelled ?? 0).toLocaleString()} label="clips labelled" />
-        <Stat value={stats?.rank ? `#${stats.rank}` : '—'} label="all-time rank" />
+        <Stat value={stats?.rank ? `#${stats.rank}` : 'Unranked'} label="overall rank" />
         <Stat value={today} label="today" />
         <Stat value={`${s.current} ${s.current === 1 ? 'day' : 'days'}`} label={`streak · best ${s.longest}`} />
       </section>

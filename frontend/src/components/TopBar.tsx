@@ -90,7 +90,7 @@ export default function TopBar() {
           {loading ? null : session && profile ? (
             <AccountMenu />
           ) : session ? (
-            <ButtonLink to="/welcome" size="sm" variant="primary">Finish sign-up</ButtonLink>
+            <ButtonLink to="/welcome" size="sm" variant="primary">Finish signing up</ButtonLink>
           ) : (
             <>
               <ButtonLink to="/login" size="sm" variant="ghost">Log in</ButtonLink>

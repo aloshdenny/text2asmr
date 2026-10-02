@@ -9,7 +9,6 @@ function Footer() {
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-6 text-xs text-ink-muted sm:px-6">
         <span>ASMR Board · part of text2asmr</span>
         <Link to="/leaderboard" className="transition-colors hover:text-ink">Leaderboard</Link>
-        <Link to="/guide" className="transition-colors hover:text-ink">Sound guide</Link>
         <a href="https://github.com/aloshdenny/text2asmr" className="transition-colors hover:text-ink">GitHub</a>
       </div>
     </footer>

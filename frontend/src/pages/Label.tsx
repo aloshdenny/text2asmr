@@ -184,7 +184,7 @@ export default function Label() {
       </div>
 
       {phase === 'empty' && (
-        <EmptyState title="You’ve heard every clip" description="Thank you — that’s the whole queue. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
+        <EmptyState title="You’ve heard every clip" description="Thank you, that’s the whole queue. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
       )}
       {phase === 'error' && <EmptyState title="Something went wrong" description={error} action={<Button onClick={next}>Try again</Button>} />}
 
@@ -245,7 +245,7 @@ export default function Label() {
           </Card>
 
           <Card className="mt-3">
-            <p className="mb-4 text-sm text-ink-muted">Tick everything you can hear — most clips have more than one sound.</p>
+            <p className="mb-4 text-sm text-ink-muted">Tick everything you can hear. Most clips have more than one sound.</p>
             <div className="space-y-4">
               {groups.map(([g, opts]) => (
                 <div key={g}>
@@ -286,7 +286,7 @@ export default function Label() {
               />
             )}
             <p className="mt-4 min-h-5 border-t border-hairline pt-3 text-xs text-ink-muted">
-              {hint ? <><span className="font-medium text-ink">{hint.key}</span> — {hint.hint}</> : 'Hover a label to see what it covers.'}
+              {hint ? <><span className="font-medium text-ink">{hint.key}:</span> {hint.hint}</> : 'Hover a label to see what it covers.'}
             </p>
           </Card>
 
@@ -301,7 +301,7 @@ export default function Label() {
             </Button>
           </div>
           <p className="mt-4 hidden text-xs text-ink-muted sm:block">
-            <Kbd>1</Kbd>–<Kbd>0</Kbd> and <Kbd>A</Kbd>–<Kbd>J</Kbd> toggle labels · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>U</Kbd> can’t tell · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
+            <Kbd>1</Kbd> to <Kbd>0</Kbd> and <Kbd>A</Kbd> to <Kbd>J</Kbd> toggle labels · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>U</Kbd> can’t tell · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
           </p>
         </>
       )}
