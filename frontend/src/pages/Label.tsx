@@ -184,7 +184,7 @@ export default function Label() {
       </div>
 
       {phase === 'empty' && (
-        <EmptyState title="All caught up" description="Every clip has enough listeners for now. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
+        <EmptyState title="You’ve heard every clip" description="Thank you — that’s the whole queue. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
       )}
       {phase === 'error' && <EmptyState title="Something went wrong" description={error} action={<Button onClick={next}>Try again</Button>} />}
 

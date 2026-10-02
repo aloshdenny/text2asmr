@@ -49,6 +49,7 @@ def main() -> int:
     ap.add_argument("--per-class", type=int, default=1700)
     ap.add_argument("--per-recording", type=int, default=4)
     ap.add_argument("--models", default="gemini-3.1-pro,mimo-v2.6-flash")
+    ap.add_argument("--cut-only", action="store_true", help="only cut the clips (no LLM labels, no spend), e.g. to queue them on the crowd site")
     ap.add_argument("--cap", type=float, default=220.0, help="USD cap across all LLM labellers in this job")
     ap.add_argument("--dl-workers", type=int, default=24, help="clips fetched and labelled at once")
     ap.add_argument("--seed", type=int, default=0)
@@ -57,7 +58,7 @@ def main() -> int:
     os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     from huggingface_hub import hf_hub_download
     a.out.mkdir(parents=True, exist_ok=True)
-    key = os.environ["OPENROUTER_API_KEY_GS"]
+    key = None if a.cut_only else os.environ["OPENROUTER_API_KEY_GS"]
     ledger = Ledger(a.out / "ledger.json", a.cap)
 
     # ---- the stratified pool ----
@@ -103,14 +104,14 @@ def main() -> int:
             m = re.match(r"audio/([A-Za-z0-9_-]{11})\.(m4a|webm|opus|mp3|flac|wav)$", f)
             if m: yt_files.setdefault(m.group(1), f)
 
-    models = [m for m in a.models.split(",") if m]
+    models = [] if a.cut_only else [m for m in a.models.split(",") if m]
     sinks = {m: a.out / f"{m}.jsonl" for m in models}
     done = {m: ({json.loads(l)["clip"] for l in open(f, encoding="utf-8") if not json.loads(l)["raw"].startswith("ERROR")}
                 if f.exists() else set()) for m, f in sinks.items()}
     lock = threading.Lock()
     by_rec = defaultdict(list)
     for p in pool:
-        if any(p["uid"] not in done[m] for m in models): by_rec[(p["repo"], p["rec"])].append(p)
+        if a.cut_only or any(p["uid"] not in done[m] for m in models): by_rec[(p["repo"], p["rec"])].append(p)
     log(f"{sum(len(v) for v in by_rec.values())} clips in {len(by_rec)} recordings still to label; ledger ${ledger.spent:.2f}/{a.cap}")
     tmp = Path(tempfile.mkdtemp(prefix="pool_", dir=str(a.out)))
     n_done = [0]

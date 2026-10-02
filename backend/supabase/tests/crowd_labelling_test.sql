@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(46);
+select plan(52);
 
 -- four people: a, b, c finished their profile; d signed in but did not
 insert into auth.users (id, email) values
@@ -81,14 +81,28 @@ select lives_ok($$select * from public.submit_label((select clip_id from public.
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
 select is((select audio_path from public.next_clip()), 't2.mp3', 'cara gets the other clip once clip 1 has its two answers');
 select lives_ok($$select public.skip_clip((select clip_id from public.next_clip()))$$, 'cara can pass on a clip');
-select is((select count(*) from public.next_clip()), 0::bigint, '... and never gets it back; nothing else is left for her');
+select is((select audio_path from public.next_clip()), 't1.mp3', 'never dry: past its quorum, the unsure clip still takes more listeners');
+reset role;
+select ok((select skips from public.clips where audio_path = 't2.mp3') = 1, 'a skip is counted on the clip');
+select ok((select need from public.clips where audio_path = 't2.mp3') < 0.3, '... and sinks it for everyone');
+select ok((select need from public.clips where audio_path = 't1.mp3') between 0.3 and 0.6, 'quorum reached: need falls to its uncertainty and disagreement');
+update public.assignments set assigned_at = now() - interval '10 seconds';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
+select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping', 'whispering'], null, false, 3000)$$,
+                'a third judge answers');
+reset role;
+select is((select round(agreement::numeric, 2) from public.clips where audio_path = 't1.mp3'), 0.67, 'agreement is the mean Jaccard of the answers');
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
+select is((select count(*) from public.next_clip()), 0::bigint, 'a listener runs out only after hearing every clip');
 reset role;
 
 -- contributions and export
 select is((select array_agg(username order by rank, username) from public.leaderboard() where username in ('alice', 'bob', 'kitty')), array['alice', 'bob'], 'leaderboard lists labellers');
 set local role service_role;
 set local request.jwt.claims = '{"role": "service_role"}';
-select is((select count(*) from public.admin_export_labels() where source_uid = 'pool:one'), 2::bigint, 'export carries the source uid');
+select is((select count(*) from public.admin_export_labels() where source_uid = 'pool:one'), 3::bigint, 'export carries the source uid');
 select is((select labeller from public.admin_export_labels() where username = 'alice'), 'crowd:00000000', 'site listeners export as crowd:<id>');
 reset role;
 set local request.jwt.claims = '';
