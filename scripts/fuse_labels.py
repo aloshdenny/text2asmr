@@ -78,11 +78,13 @@ def arrays(votes, uids, labellers):
     return A
 
 
-def fit(A, humans, has_human, human_prior=10.0, unlabelled_weight=1.0, iters=30):
+def fit(A, humans, has_human, human_prior=10.0, unlabelled_weight=1.0, iters=30, shrink=0.0, pooled=None):
     """Per class: prior + (sensitivity, specificity) per labeller, by EM. People get Beta pseudo-counts that say
     "reliable" (sens 0.8, spec 0.95, strength --human-prior); machines start flat. Clips no person labelled count
     `unlabelled_weight` toward the rates: Gemini and MiMo make correlated mistakes, and with full weight their
-    agreement on 8k unlabelled clips swamps the people (precision fell 54% -> 32%)."""
+    agreement on 8k unlabelled clips swamps the people (precision fell 54% -> 32%).
+    shrink > 0: a machine's rates on a class are pulled toward its rates over all classes (`pooled`), with that
+    many pseudo-counts, so a class with a handful of human-labelled positives cannot learn a wild sensitivity."""
     w = np.where(has_human, 1.0, unlabelled_weight)
     model = {}
     for lab in LABELS:
@@ -101,14 +103,34 @@ def fit(A, humans, has_human, human_prior=10.0, unlabelled_weight=1.0, iters=30)
                 fn = np.sum(c * post * ~yes); tn = np.sum(c * (1 - post) * ~yes)
                 if l in humans:
                     k = human_prior; tp += 0.8 * k; fn += 0.2 * k; tn += 0.95 * k; fp += 0.05 * k
+                elif shrink and pooled and l in pooled:
+                    se0, sp0 = pooled[l]; tp += se0 * shrink; fn += (1 - se0) * shrink; tn += sp0 * shrink; fp += (1 - sp0) * shrink
                 rates[l] = ((tp + 1) / (tp + fn + 2), (tn + 1) / (tn + fp + 2))
-            post = posterior(L, prior, rates)
+            post = posterior(L, prior, rates, n)
         model[lab] = (prior, rates)
     return model
 
 
-def posterior(L, prior, rates):
-    lo = np.full(len(next(iter(L.values()))[0]) if L else 0, np.log(prior / (1 - prior)))
+def pooled_rates(model, humans):
+    """Each machine's sensitivity / specificity over all classes, weighted by how many positives / negatives a
+    class has (its prior)."""
+    acc = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])
+    for prior, rates in model.values():
+        for l, (se, sp) in rates.items():
+            if l in humans: continue
+            a = acc[l]; a[0] += prior * se; a[1] += prior; a[2] += (1 - prior) * sp; a[3] += 1 - prior
+    return {l: (a[0] / a[1], a[2] / a[3]) for l, a in acc.items() if a[1] > 0 and a[3] > 0}
+
+
+def fit_shrunk(A, humans, has_human, human_prior, unlabelled_weight, shrink):
+    m = fit(A, humans, has_human, human_prior, unlabelled_weight)
+    if not shrink: return m
+    return fit(A, humans, has_human, human_prior, unlabelled_weight, shrink=shrink, pooled=pooled_rates(m, humans))
+
+
+def posterior(L, prior, rates, n):
+    """A class nobody was asked about (e.g. a vote set from before it joined the menu) keeps its prior."""
+    lo = np.full(n, np.log(prior / (1 - prior)))
     for l, (se, sp) in rates.items():
         cov, yes = L[l]
         lo += cov * np.where(yes, np.log(se / (1 - sp)), np.log((1 - se) / sp))
@@ -124,6 +146,7 @@ def main() -> int:
     ap.add_argument("--human-prior", type=float, default=10.0)
     ap.add_argument("--cv-against", default="", help="5-fold: hide this person's labels on a fold, score the fusion against them")
     ap.add_argument("--unlabelled-weight", type=float, default=0.0, help="weight of clips no person labelled, in the rates")
+    ap.add_argument("--shrink", type=float, default=20.0, help="pseudo-counts pulling a machine's per-class rates to its overall rates (CV: precision vs Ryyan 38% -> 44%, F1 flat)")
     a = ap.parse_args()
     votes = load_votes(a.pool, a.votes)
     humans = set()
@@ -144,8 +167,8 @@ def main() -> int:
         for k in range(5):
             test = set(A[k::5]); saved = {u: votes[u].pop(who) for u in test}
             AR = arrays(votes, uids, labellers); hh = np.array([any(h in votes[u] for h in humans) for u in uids])
-            m = fit(AR, humans, hh, a.human_prior, a.unlabelled_weight)
-            post = {lab: posterior(AR[lab], m[lab][0], m[lab][1]) for lab in LABELS}
+            m = fit_shrunk(AR, humans, hh, a.human_prior, a.unlabelled_weight, a.shrink)
+            post = {lab: posterior(AR[lab], m[lab][0], m[lab][1], len(uids)) for lab in LABELS}
             for u in test: P[u] = {lab for lab in LABELS if post[lab][ix[u]] > 0.5}
             for u, v in saved.items(): votes[u][who] = v
         def score(pred):
@@ -158,8 +181,8 @@ def main() -> int:
             pr, rc, f1 = score({u: (votes[u].get(l) or set()) for u in A}); print(f"{l:12} {pr:4.0%} {rc:6.0%} {f1:5.2f}")
 
     AR = arrays(votes, uids, labellers); hh = np.array([any(h in votes[u] for h in humans) for u in uids])
-    m = fit(AR, humans, hh, a.human_prior, a.unlabelled_weight)
-    post = {lab: posterior(AR[lab], m[lab][0], m[lab][1]) for lab in LABELS}
+    m = fit_shrunk(AR, humans, hh, a.human_prior, a.unlabelled_weight, a.shrink)
+    post = {lab: posterior(AR[lab], m[lab][0], m[lab][1], len(uids)) for lab in LABELS}
     with open(a.out, "w", encoding="utf-8") as fh:
         for i, u in enumerate(uids):
             p = {lab: round(float(post[lab][i]), 3) for lab in LABELS}

@@ -54,8 +54,10 @@ def main() -> int:
     dev = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
     a.out.mkdir(parents=True, exist_ok=True)
     # fp16 on CUDA fits beside a long training job (~4 GB); MPS needs fp32 (fp16 gives NaNs there)
-    pipe = StableAudioPipeline.from_pretrained("stabilityai/stable-audio-open-1.0",
-                                               torch_dtype=torch.float16 if dev == "cuda" else torch.float32).to(dev)
+    # only the diffusers components: the repo's root model.safetensors is the 4.9 GB stable-audio-tools checkpoint
+    from huggingface_hub import snapshot_download
+    sao = snapshot_download("stabilityai/stable-audio-open-1.0", ignore_patterns=["model.safetensors", "model.ckpt", "*.wav", "*.png"])
+    pipe = StableAudioPipeline.from_pretrained(sao, torch_dtype=torch.float16 if dev == "cuda" else torch.float32).to(dev)
     # the scheduler's Brownian-tree noise (torchsde) recurses past Python's limit with this torch; its output is
     # normalised Brownian increments, i.e. N(0, 1) per step, so seeded Gaussian noise is the same distribution
     import diffusers.schedulers.scheduling_cosine_dpmsolver_multistep as cos
