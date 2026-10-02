@@ -75,19 +75,28 @@ class Scorer:
         self.win = torch.hann_window(N_FFT, periodic=True, device=dev)
         log(f"scorer ready: classes={self.classes}")
 
+    def mels(self, wavs: np.ndarray):
+        """(B, 480000) float32 -> (B, 1001, 64) dB mels on the device, as the training shards store them."""
+        t = self.torch
+        x = t.from_numpy(wavs).to(self.dev)
+        spec = t.stft(x, N_FFT, HOP, N_FFT, self.win, center=True, pad_mode="reflect", return_complex=True)
+        mel = t.einsum("mf,bft->btm", self.fb, spec.real ** 2 + spec.imag ** 2)
+        return (10.0 * t.log10(t.clamp(mel, min=1e-10)))[:, :FRAMES, :]
+
+    def embed_mels(self, mels):
+        """(B, 1001, 64) mels (array or tensor) -> (B, D) L2-normalised audio embeddings, on the device."""
+        t = self.torch
+        with t.no_grad():
+            feats = t.as_tensor(mels, device=self.dev).float().unsqueeze(1)          # (B, 1, 1001, 64)
+            is_longer = t.zeros((feats.shape[0], 1), dtype=t.bool, device=self.dev)
+            emb = self.model.get_audio_features(input_features=feats, is_longer=is_longer)
+            return emb / emb.norm(dim=-1, keepdim=True)
+
     def __call__(self, wavs: np.ndarray) -> np.ndarray:
         """(B, 480000) float32 -> (B, C+1) probabilities, background last."""
         t = self.torch
         with t.no_grad():
-            x = t.from_numpy(wavs).to(self.dev)
-            spec = t.stft(x, N_FFT, HOP, N_FFT, self.win, center=True, pad_mode="reflect", return_complex=True)
-            power = spec.real ** 2 + spec.imag ** 2
-            mel = t.einsum("mf,bft->btm", self.fb, power)
-            db = (10.0 * t.log10(t.clamp(mel, min=1e-10)))[:, :FRAMES, :]
-            feats = db.unsqueeze(1)                                   # (B, 1, 1001, 64)
-            is_longer = t.zeros((feats.shape[0], 1), dtype=t.bool, device=self.dev)
-            emb = self.model.get_audio_features(input_features=feats, is_longer=is_longer)
-            emb = emb / emb.norm(dim=-1, keepdim=True)
+            emb = self.embed_mels(self.mels(wavs))
             return t.softmax(self.head(emb * 10.0), dim=1).float().cpu().numpy()
 
 
