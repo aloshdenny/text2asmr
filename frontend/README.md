@@ -14,7 +14,7 @@ npm run build                   # typecheck + production build in dist/
 
 Pages: `/` (landing), `/signup` and `/login` (email + password), `/welcome` (onboarding: username, optional
 picture, 18+), `/dashboard` (your stats and contribution graph), `/label` (the labelling loop), `/leaderboard`,
-`/u/<username>` (public profile), `/guide`, `/settings` (username, picture, delete account), and
+`/u/<username>` (public profile), `/settings` (username, picture, delete account), and
 `/forgot-password`, `/auth/confirm`, `/reset-password` for email links.
 
 Keys on `/label`: `1`-`0`, `A`-`J` toggle labels · `Space` play/pause · `R` replay · `U` can't tell ·

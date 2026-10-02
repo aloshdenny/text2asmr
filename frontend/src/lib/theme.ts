@@ -2,10 +2,10 @@ export type Theme = 'light' | 'dark'
 
 const KEY = 'asmrboard-theme'
 
-/** Light by default; the toggle switches to dark and remembers it. The <html data-theme> attribute (stamped by the
+/** Dark by default; the toggle switches to light and remembers it. The <html data-theme> attribute (stamped by the
  *  script in index.html before first paint) is the single source of truth -- CSS keyed on it does the rest. */
 export function currentTheme(): Theme {
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
 }
 
 export function toggleTheme() {

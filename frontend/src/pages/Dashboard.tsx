@@ -10,7 +10,7 @@ import { dayKey } from '../lib/supabase'
 export function ArenaPill() {
   return (
     <span className="hum inline-flex">
-      <Link to="/arena" className="inline-flex h-8 items-center gap-1.5 px-3.5 text-[13px] font-medium text-ink transition-colors hover:text-brand">
+      <Link to="/leaderboard" className="inline-flex h-8 items-center gap-1.5 px-3.5 text-[13px] font-medium text-ink transition-colors hover:text-brand">
         Check out the Arena <span aria-hidden>✨</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="h-3.5 w-3.5">
           <path d="M5 12h14M13 6l6 6-6 6" />

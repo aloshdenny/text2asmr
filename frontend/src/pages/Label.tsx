@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
-import GuidePanel from '../components/GuidePanel'
+import HeadphonesPrompt from '../components/HeadphonesPrompt'
 import { AppLayout } from '../components/Layouts'
 import { Button, ButtonLink, Card, EmptyState, Icon, Kbd, Spinner, cx } from '../components/ui'
 import { KEYS, loadMenu, supabase, type Option } from '../lib/supabase'
@@ -25,7 +25,7 @@ export default function Label() {
   const [totals, setTotals] = useState<{ total: number; today: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
-  const [guideOpen, setGuideOpen] = useState(false)
+  const [intro, setIntro] = useState(true) // the headphones prompt, once per visit
   const audio = useRef<HTMLAudioElement>(null)
   const otherRef = useRef<HTMLInputElement>(null)
 
@@ -131,6 +131,7 @@ export default function Label() {
   }
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
+    if (intro) return // the headphones prompt has the keyboard (Enter / Space on its button, Esc)
     const t = e.target as HTMLElement
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) {
       if (e.key === 'Enter') {
@@ -139,7 +140,7 @@ export default function Label() {
       } else if (e.key === 'Escape') t.blur()
       return
     }
-    if (e.metaKey || e.ctrlKey || e.altKey || guideOpen) return
+    if (e.metaKey || e.ctrlKey || e.altKey) return
     const k = e.key.toLowerCase()
     const i = KEYS.indexOf(k)
     if (i >= 0 && i < menu.length) {
@@ -180,7 +181,6 @@ export default function Label() {
             {totals && <span className="hidden sm:inline"> · {totals.today} today · {totals.total.toLocaleString()} all time</span>}
           </span>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setGuideOpen(true)}>Sound guide</Button>
       </div>
 
       {phase === 'empty' && (
@@ -310,7 +310,15 @@ export default function Label() {
           {toast}
         </div>
       )}
-      {guideOpen && <GuidePanel onClose={() => setGuideOpen(false)} />}
+      {intro && (
+        <HeadphonesPrompt
+          onReady={() => {
+            setStarted(true)
+            audio.current?.play().catch(() => {})
+          }}
+          onClosed={() => setIntro(false)}
+        />
+      )}
     </AppLayout>
   )
 }

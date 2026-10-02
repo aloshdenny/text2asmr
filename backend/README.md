@@ -8,7 +8,6 @@ per class.
 supabase/migrations/   schema, row-level security, labelling + leaderboard + admin RPCs, storage buckets
 supabase/tests/        pgTAP tests (supabase test db)
 sync/push_clips.py     queue clips: unsure fused clips, unlabelled (mined) windows, hidden controls
-sync/push_guide.py     publish the sound guide (example clips per label, public)
 sync/pull_labels.py    export labels as judges/human/crowd.jsonl for fuse_labels.py
 sync/import_contributors.py  accounts for people who labelled Ear Check kits before the site, kit labels credited
 supabase/templates/    auth emails (confirm sign-up, set password) linking to <site>/auth/confirm
@@ -70,7 +69,6 @@ Feed it from the research server (where the pool clips live):
 ```bash
 python sync/push_clips.py --fused fused.jsonl --clips D:/t2a/pool D:/t2a/pool_yt D:/t2a/pool_spray \
     --humans judges/human/*.jsonl --n-unsure 2000 --batch 2026-10-a
-python sync/push_guide.py --plan kit5_plan.json --clips D:/t2a/pool D:/t2a/pool_yt D:/t2a/pool_spray
 python sync/pull_labels.py --out judges/human/crowd.jsonl
 python scripts/fuse_labels.py ... --humans judges/human/*.jsonl      # crowd.jsonl included
 ```

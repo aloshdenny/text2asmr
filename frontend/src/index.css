@@ -188,3 +188,28 @@ body {
 /* progress rings on the home page draw in once */
 .ring-arc { transition: stroke-dashoffset 1.1s cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .ring-arc { transition: none; } }
+
+/* headphones prompt: fades and rises in, sinks out; waves breathe out of the ear cups */
+.hp-backdrop { animation: hp-fade 0.25s ease-out both; }
+.hp-panel { animation: hp-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.hp-out { animation: hp-fade-out 0.22s ease-in both; }
+.hp-out .hp-panel { animation: hp-sink 0.22s ease-in both; }
+@keyframes hp-fade { from { opacity: 0; } }
+@keyframes hp-fade-out { to { opacity: 0; } }
+@keyframes hp-rise { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
+@keyframes hp-sink { to { opacity: 0; transform: translateY(6px) scale(0.98); } }
+.hp-wave { opacity: 0; animation: hp-wave 1.9s ease-out infinite; }
+.hp-wave.d2 { animation-delay: 0.45s; }
+.hp-left { --dx: -5px; }
+.hp-right { --dx: 5px; }
+@keyframes hp-wave {
+  0% { opacity: 0; transform: translateX(0); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(var(--dx)); }
+}
+.hp-bob { animation: hp-bob 3.2s ease-in-out infinite; }
+@keyframes hp-bob { 50% { transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .hp-backdrop, .hp-panel, .hp-out, .hp-out .hp-panel, .hp-bob { animation: none; }
+  .hp-wave { animation: none; opacity: 0.7; }
+}

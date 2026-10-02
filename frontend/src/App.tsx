@@ -1,10 +1,8 @@
 import type { ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { GuideList } from './components/GuidePanel'
 import { AppLayout } from './components/Layouts'
-import { Card, Loading, PageHeader } from './components/ui'
+import { Loading } from './components/ui'
 import { AuthProvider, useAuth } from './lib/auth'
-import Arena from './pages/Arena'
 import Dashboard from './pages/Dashboard'
 import Home from './pages/Home'
 import Label from './pages/Label'
@@ -25,16 +23,6 @@ function RequireUser({ children }: { children: ReactNode }) {
   return children
 }
 
-function Guide() {
-  return (
-    <AppLayout width="narrow">
-      <PageHeader title="Sound guide" description="What each label covers, with example clips. Labellers who share one meaning per label make every label worth more." />
-      <Card>
-        <GuideList />
-      </Card>
-    </AppLayout>
-  )
-}
 
 export default function App() {
   return (
@@ -51,10 +39,10 @@ export default function App() {
           <Route path="/dashboard" element={<RequireUser><Dashboard /></RequireUser>} />
           <Route path="/label" element={<RequireUser><Label /></RequireUser>} />
           <Route path="/settings" element={<RequireUser><Settings /></RequireUser>} />
-          <Route path="/arena" element={<Arena />} />
+          <Route path="/arena" element={<Navigate to="/leaderboard" replace />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/u/:username" element={<Profile />} />
-          <Route path="/guide" element={<Guide />} />
+          <Route path="/guide" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

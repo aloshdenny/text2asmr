@@ -12,7 +12,7 @@ export default function Ring({ percent, color, label, caption }: { percent: numb
     return () => window.cancelAnimationFrame(t)
   }, [percent])
   return (
-    <figure className="flex flex-col items-center gap-3" style={{ width: size }}>
+    <figure className="flex w-[136px] flex-col items-center gap-3 sm:w-56">
       <div className="relative" style={{ width: size, height: size }}>
         <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" role="img" aria-label={`${percent}% ${label}`}>
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-hover)" strokeWidth={stroke} />

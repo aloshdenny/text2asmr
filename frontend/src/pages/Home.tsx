@@ -44,7 +44,6 @@ export default function Home() {
           {signedIn ? (
             <>
               <ButtonLink to="/label" variant="primary" size="lg">Start labelling</ButtonLink>
-              <ButtonLink to="/guide" size="lg">Hear the sound guide</ButtonLink>
             </>
           ) : (
             <ButtonLink to="/signup" variant="primary" size="lg">Create an account</ButtonLink>
