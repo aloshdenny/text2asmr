@@ -2,36 +2,43 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Avatar from '../components/Avatar'
 import { AppLayout } from '../components/Layouts'
-import { ButtonLink, Card, CardHeader, Stat, cx } from '../components/ui'
+import Ring from '../components/Ring'
+import { ButtonLink, Card, CardHeader, cx } from '../components/ui'
 import { useAuth } from '../lib/auth'
 import { useLeaderboard } from '../lib/stats'
 import { supabase } from '../lib/supabase'
 
-type Stats = { labels: number; labellers: number; clips: number; clips_complete: number }
+type Progress = { corpus_items: number; human_labelled_items: number; ai_labelled_items: number }
+
+/** Whole percent; anything above zero but under one shows as 1%. */
+const pct = (part: number, whole: number) => {
+  const p = whole > 0 ? (100 * part) / whole : 0
+  return p > 0 && p < 1 ? 1 : Math.round(p)
+}
 
 const STEPS = [
   ['Listen', 'One short clip at a time. Headphones help.'],
   ['Tick what you hear', 'Whispers, tapping, crinkles, brushing. Usually more than one.'],
-  ['Stay independent', 'Every clip goes to several listeners, and nobody sees anyone else’s answer.'],
+  ['Stay independent', 'Every clip goes to several labellers, and nobody sees anyone else’s answer.'],
 ]
 
 export default function Home() {
   const { session, profile } = useAuth()
-  const [stats, setStats] = useState<Stats | null>(null)
+  const [progress, setProgress] = useState<Progress | null>(null)
   const top = useLeaderboard(30, 5)
   useEffect(() => {
-    supabase.rpc('site_stats').then(({ data }) => setStats((data as Stats[] | null)?.[0] ?? null))
+    supabase.rpc('dataset_progress').then(({ data }) => setProgress((data as Progress[] | null)?.[0] ?? null))
   }, [])
-  const n = (v?: number) => (v ?? 0).toLocaleString()
+  const human = progress ? pct(progress.human_labelled_items, progress.corpus_items) : 0
   const signedIn = Boolean(session && profile?.onboarded)
   return (
     <AppLayout>
       <section className="max-w-2xl pb-4 pt-6 sm:pt-12">
         <p className="text-sm font-medium text-ink-muted">A community dataset for text2asmr</p>
-        <h1 className="mt-3 text-4xl font-semibold tracking-tight text-ink sm:text-5xl">Teach machines to hear ASMR.</h1>
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight text-ink sm:text-5xl">Teach machines to generate ASMR.</h1>
         <p className="mt-4 text-[17px] leading-relaxed text-ink-secondary">
-          Listen to short clips and tick the sounds you hear. Your labels train the open sound classifier behind
-          text2asmr, and every one of them counts toward your place on the board.
+          We’re an open platform where anyone can help label audio for the OpenASMR project. Every clip you label
+          counts toward your place on the board.
         </p>
         <div className="mt-7 flex flex-wrap gap-2.5">
           {signedIn ? (
@@ -46,11 +53,12 @@ export default function Home() {
         <p className="mt-4 text-xs text-ink-muted">18+ only. Some clips contain intimate vocal sounds.</p>
       </section>
 
-      <section className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat value={n(stats?.labels)} label="clips labelled" />
-        <Stat value={n(stats?.labellers)} label="listeners" />
-        <Stat value={n(stats?.clips)} label="clips in the queue" />
-      </section>
+      <Card className="mt-10 py-8">
+        <div className="flex flex-wrap items-start justify-center gap-x-6 gap-y-8 sm:gap-x-24">
+          <Ring percent={human} color="var(--ring-green)" label="data labelled by people" caption="on ASMR Board and the Ear Check kits" />
+          <Ring percent={progress ? 100 - human : 0} color="var(--brand)" label="data labelled by AI" caption="our CLAP-ASMR model" />
+        </div>
+      </Card>
 
       <section className="mt-3 grid gap-3 md:grid-cols-[1.4fr_1fr]">
         <Card>
@@ -68,7 +76,7 @@ export default function Home() {
           </ol>
         </Card>
         <Card>
-          <CardHeader title="Top listeners" description="Last 30 days" action={<Link to="/leaderboard" className="text-sm text-brand hover:underline">All</Link>} />
+          <CardHeader title="Top labellers" description="Last 30 days" action={<Link to="/leaderboard" className="text-sm text-brand hover:underline">All</Link>} />
           {top && top.length === 0 && <p className="text-sm text-ink-muted">No labels yet. Be the first.</p>}
           <ol className="divide-y divide-hairline">
             {(top ?? []).map((r) => {

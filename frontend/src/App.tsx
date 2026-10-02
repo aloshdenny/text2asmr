@@ -28,7 +28,7 @@ function RequireUser({ children }: { children: ReactNode }) {
 function Guide() {
   return (
     <AppLayout width="narrow">
-      <PageHeader title="Sound guide" description="What each label covers, with example clips. Listeners who share one meaning per label make every label worth more." />
+      <PageHeader title="Sound guide" description="What each label covers, with example clips. Labellers who share one meaning per label make every label worth more." />
       <Card>
         <GuideList />
       </Card>

@@ -42,7 +42,6 @@ export default function Leaderboard() {
     <AppLayout>
       <PageHeader
         title="Leaderboard"
-        description="Clips labelled, including the Ear Check kits from before the site."
         actions={
           <div role="tablist" className="inline-flex rounded-lg border border-hairline bg-surface-muted p-0.5">
             {PERIODS.map(([name, d]) => (
@@ -72,7 +71,7 @@ export default function Leaderboard() {
             <thead>
               <tr className="border-b border-hairline text-left text-xs text-ink-muted">
                 <th className="w-14 px-5 py-2.5 font-medium">#</th>
-                <th className="w-full py-2.5 font-medium">Listener</th>
+                <th className="w-full py-2.5 font-medium">Labeller</th>
                 <th className="whitespace-nowrap px-5 py-2.5 text-right font-medium">Clips</th>
               </tr>
             </thead>

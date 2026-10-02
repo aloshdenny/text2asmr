@@ -15,7 +15,7 @@ export default function Profile() {
   if (stats === null)
     return (
       <AppLayout>
-        <EmptyState title="No such listener" description={`Nobody goes by @${username}.`} action={<ButtonLink to="/leaderboard">Back to the leaderboard</ButtonLink>} />
+        <EmptyState title="No such labeller" description={`Nobody goes by @${username}.`} action={<ButtonLink to="/leaderboard">Back to the leaderboard</ButtonLink>} />
       </AppLayout>
     )
   const s = streaks(counts)
@@ -30,7 +30,7 @@ export default function Profile() {
             <Avatar name={stats.username} url={stats.avatar_url} size={40} />
             <span>
               {stats.display_name || stats.username}
-              <span className="block text-sm font-normal text-ink-muted">@{stats.username} · listening since {since(stats.joined)}</span>
+              <span className="block text-sm font-normal text-ink-muted">@{stats.username} · labelling since {since(stats.joined)}</span>
             </span>
           </span>
         }

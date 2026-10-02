@@ -40,7 +40,7 @@ export default function Dashboard() {
               {profile.display_name || profile.username}
               <span className="block text-sm font-normal text-ink-muted">
                 @{profile.username}
-                {stats ? ` · listening since ${since(stats.joined)}` : ''}
+                {stats ? ` · labelling since ${since(stats.joined)}` : ''}
               </span>
             </span>
           </span>
