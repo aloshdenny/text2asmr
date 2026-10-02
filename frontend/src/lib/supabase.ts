@@ -1,14 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-if (!url || !key) throw new Error('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (see frontend/.env.example)')
-
-export const supabase = createClient(url, key)
-export const GITHUB_AUTH = import.meta.env.VITE_GITHUB_AUTH === '1'
+/** Supabase is reached only through this site's /sb proxy (vite.config.ts in dev, api/sb.ts on Vercel), which adds
+ *  the API key server-side: no project URL or key ships in the bundle. "public" is a placeholder the proxy replaces. */
+export const API = `${window.location.origin}/sb`
+export const supabase = createClient(API, 'public')
 
 /** Public files of the sound guide (bucket "guide"). */
-export const guideUrl = (path: string) => `${url}/storage/v1/object/public/guide/${path}`
+export const guideUrl = (path: string) => `${API}/storage/v1/object/public/guide/${path}`
+
+/** An avatar is an https URL or an object in the public "avatars" bucket. */
+export const avatarSrc = (url?: string | null) =>
+  !url ? null : url.startsWith('avatars/') ? `${API}/storage/v1/object/public/${url}` : url
 
 export type Option = { key: string; grp: 'Voice' | 'Triggers' | 'Other'; hint: string; sort: number }
 export type GuideEntry = { label: string; hint: string; clips: string[] }

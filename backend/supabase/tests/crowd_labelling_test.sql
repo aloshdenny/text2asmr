@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(30);
+select plan(43);
 
 -- four people: a, b, c finished their profile; d signed in but did not
 insert into auth.users (id, email) values
@@ -86,7 +86,36 @@ select is((select array_agg(username order by rank, username) from public.leader
 set local role service_role;
 set local request.jwt.claims = '{"role": "service_role"}';
 select is((select count(*) from public.admin_export_labels() where source_uid = 'pool:one'), 2::bigint, 'export carries the source uid');
+select is((select labeller from public.admin_export_labels() where username = 'alice'), 'crowd:00000000', 'site listeners export as crowd:<id>');
 reset role;
+set local request.jwt.claims = '';
+
+-- a kit labeller from before the site: account without a password, kit labels credited
+select ok(private.import_contributor('Kit@Example.test', 'kitty', 'Kit', 'adi') is not null, 'import makes the account');
+select is(private.import_contributor('kit@example.test', 'kitty', 'Kit', 'adi'),
+          (select id from auth.users where email = 'kit@example.test'), 'importing again reuses it');
+insert into public.imported_labels (user_id, source_uid, labels, kit, created_at)
+select (select id from public.profiles where username = 'kitty'), 'pool:old' || g, array['tapping'], 'kit-2', now() - interval '3 days'
+from generate_series(1, 3) g;
+select is((select array_agg(username order by rank, username) from public.leaderboard()), array['kitty', 'alice', 'bob'],
+          'imported kit labels count on the leaderboard');
+select is((select sum(labelled) from public.contributions('kitty')), 3::numeric, 'and on the contribution graph');
+set local role anon;
+select is(public.account_status(' KIT@example.test '), 'needs_password', 'an imported account without a password is reported');
+select is(public.account_status('a@example.test'), 'ok', 'ordinary accounts are not');
+select is(public.account_status('nobody@example.test'), 'ok', 'nor unknown emails');
+reset role;
+update auth.users set encrypted_password = 'x' where email = 'kit@example.test';
+select is(public.account_status('kit@example.test'), 'ok', 'once a password is set, it is a normal account');
+
+-- alice deletes her account: off the lists, her label stays (and still exports)
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000a", "role": "authenticated"}';
+select lives_ok('select public.delete_account()', 'alice deletes her account');
+reset role;
+select ok(not exists (select 1 from auth.users where id = '00000000-0000-0000-0000-00000000000a'), 'her sign-in is gone');
+select is((select array_agg(username order by rank, username) from public.leaderboard()), array['kitty', 'bob'], 'she is off the leaderboard');
+select is((select count(*) from public.labels where user_id = '00000000-0000-0000-0000-00000000000a'), 1::bigint, 'her label stays');
 
 select * from finish();
 rollback;

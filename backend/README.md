@@ -1,4 +1,4 @@
-# Ear Check backend (Supabase)
+# ASMR Board backend (Supabase)
 
 Community labelling for the ASMR-CLAP ontology. Listeners label 6-second clips on the site in `frontend/`; their
 labels go back into `scripts/fuse_labels.py`, where each listener is one more labeller whose reliability is learned
@@ -10,6 +10,8 @@ supabase/tests/        pgTAP tests (supabase test db)
 sync/push_clips.py     queue clips: unsure fused clips, unlabelled (mined) windows, hidden controls
 sync/push_guide.py     publish the sound guide (example clips per label, public)
 sync/pull_labels.py    export labels as judges/human/crowd.jsonl for fuse_labels.py
+sync/import_contributors.py  accounts for people who labelled Ear Check kits before the site, kit labels credited
+supabase/templates/    auth emails (confirm sign-up, set password) linking to <site>/auth/confirm
 ```
 
 ## How it stays blind and multi-judge
@@ -45,13 +47,23 @@ python sync/push_clips.py --manifest manifest.jsonl --batch local-test   # rows:
 If a Docker Desktop leftover breaks image pulls (`docker-credential-desktop` not found), point the CLI at a clean
 config: `DOCKER_CONFIG=$(mktemp -d) DOCKER_HOST=unix://$HOME/.colima/default/docker.sock supabase start ...`.
 
+## Accounts
+
+Email + password. People who labelled Ear Check kits before the site get an account made for them
+(`import_contributors.py`, run with the database URL; emails live in a local file, never in git): no password,
+their kit labels in `imported_labels` (they count on the leaderboard and contribution graph), and their
+fuse_labels.py name kept as `fusion_name`. When they sign in or up, `account_status()` reports `needs_password`
+for exactly those accounts and the site emails them a link to set one. Deleting an account removes the sign-in and
+takes the profile off every public list; the labels stay (under a tombstoned profile).
+
 ## Hosted project
 
-1. Create a Supabase project (aloshdenny@gmail.com account).
-2. `supabase link --project-ref <ref>` then `supabase db push` (applies the migration, creates both buckets).
-3. Auth → URL configuration: site URL = the Vercel URL; add `https://<site>/**` to redirect URLs.
-   Optional: enable the GitHub provider and set `VITE_GITHUB_AUTH=1` on the site.
-4. Feed it from the research server (where the pool clips live):
+Project `t2a` (ref gdjfvjsxsmwjzqpgbapk). Schema: `supabase db push --db-url "$SUPABASE_DB_URL"` (session
+pooler URL). Auth settings that live in the dashboard (or the Management API), mirroring `config.toml`:
+site URL `https://asmrboard.vercel.app`, redirect URL `https://asmrboard.vercel.app/**`, minimum password length
+8, email confirmation on, the two templates in `supabase/templates/`, and custom SMTP (the built-in sender only
+mails the project's team members, so set-password emails to other people need it).
+Feed it from the research server (where the pool clips live):
 
 ```bash
 python sync/push_clips.py --fused fused.jsonl --clips D:/t2a/pool D:/t2a/pool_yt D:/t2a/pool_spray \

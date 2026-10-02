@@ -7,7 +7,10 @@ import Home from './pages/Home'
 import Label from './pages/Label'
 import Leaderboard from './pages/Leaderboard'
 import Login from './pages/Login'
+import AuthConfirm from './pages/AuthConfirm'
 import Profile from './pages/Profile'
+import SetPassword from './pages/SetPassword'
+import Settings from './pages/Settings'
 import Welcome from './pages/Welcome'
 
 function RequireProfile({ children }: { children: ReactNode }) {
@@ -39,11 +42,14 @@ export default function App() {
             }
           />
           <Route path="/login" element={<Login />} />
+          <Route path="/auth/confirm" element={<AuthConfirm />} />
+          <Route path="/set-password" element={<SetPassword />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/welcome" element={<Welcome />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <footer className="footer">
-          <span>Ear Check · part of <a href="https://github.com/aloshdenny/text2asmr">text2asmr</a></span>
+          <span>ASMR Board · part of <a href="https://github.com/aloshdenny/text2asmr">text2asmr</a></span>
         </footer>
       </BrowserRouter>
     </AuthProvider>

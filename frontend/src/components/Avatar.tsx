@@ -1,7 +1,10 @@
+import { avatarSrc } from '../lib/supabase'
+
 const HUES = [262, 200, 160, 24, 330, 45, 290, 190]
 
 export default function Avatar({ name, url, size = 28 }: { name: string; url?: string | null; size?: number }) {
-  if (url) return <img className="avatar" src={url} alt="" width={size} height={size} />
+  const src = avatarSrc(url)
+  if (src) return <img className="avatar" src={src} alt="" width={size} height={size} />
   let h = 0
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   const hue = HUES[h % HUES.length]

@@ -1,3 +1,7 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/sb/:path*", "destination": "/api/sb?__p=:path*" },
+    { "source": "/((?!api/|sb/).*)", "destination": "/index.html" }
+  ]
 }

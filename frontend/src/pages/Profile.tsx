@@ -39,7 +39,12 @@ export default function Profile() {
           <h1>{stats.display_name || stats.username}</h1>
           <p className="muted">@{stats.username} · listening since {new Date(stats.joined).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</p>
         </div>
-        {me?.username === stats.username && <Link className="btn primary" to="/label">Label more</Link>}
+        {me?.username === stats.username && (
+          <div className="head-actions">
+            <Link className="btn ghost" to="/settings">Edit profile</Link>
+            <Link className="btn primary" to="/label">Label more</Link>
+          </div>
+        )}
       </div>
       <section className="stat-row">
         <div className="stat"><b>{stats.labelled.toLocaleString()}</b><span>clips labelled</span></div>

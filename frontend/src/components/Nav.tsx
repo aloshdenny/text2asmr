@@ -12,7 +12,7 @@ export default function Nav() {
         <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
           <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
         </svg>
-        Ear Check
+        ASMR Board
       </Link>
       <nav className="nav-links">
         <NavLink to="/label">Label</NavLink>

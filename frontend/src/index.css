@@ -243,3 +243,20 @@ input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--a
   .chip kbd, .btn kbd, .keys-help { display: none; }
   .chip { padding: 8px 14px; }
 }
+
+/* auth + settings */
+.tabs.wide { display: flex; width: 100%; margin-bottom: 4px; }
+.tabs.wide button { flex: 1; }
+.link-btn { font: inherit; font-size: 14px; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; margin-top: 14px; }
+.btn.back { width: auto !important; margin-top: 14px; }
+input[type='password'] {
+  font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; outline: none;
+}
+.head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings { margin-top: 16px; }
+.avatar-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.settings.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.settings.danger h2 { color: var(--danger); }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; margin-top: 12px; }
+.ok-msg { color: oklch(0.6 0.13 150); margin-top: 10px; }
