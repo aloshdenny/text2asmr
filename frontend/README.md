@@ -1,6 +1,6 @@
 # ASMR Board (site)
 
-The community labelling site for text2asmr: sign in with an email link, label 6-second clips with the keyboard,
+The community labelling site for text2asmr: sign in with email and password, label 6-second clips with the keyboard,
 climb the leaderboard, and build a GitHub-style contribution graph on your profile. Vite + React + supabase-js;
 all data rules live in the database (`backend/supabase/migrations`), so the site is static.
 
