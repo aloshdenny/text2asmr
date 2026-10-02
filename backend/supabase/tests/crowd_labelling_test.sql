@@ -14,6 +14,9 @@ insert into public.profiles (id, username, adult_confirmed_at) values
   ('00000000-0000-0000-0000-00000000000b', 'bob', now()),
   ('00000000-0000-0000-0000-00000000000c', 'cara', now());
 
+-- whatever is already queued sits out (this transaction is rolled back), so only the test's clips are served
+update public.clips set active = false;
+
 -- two clips, each to be heard by two people; the unsure one first
 set local role service_role;
 select is(public.admin_add_clips('[
@@ -82,7 +85,7 @@ select is((select count(*) from public.next_clip()), 0::bigint, '... and never g
 reset role;
 
 -- contributions and export
-select is((select array_agg(username order by rank, username) from public.leaderboard()), array['alice', 'bob'], 'leaderboard lists labellers');
+select is((select array_agg(username order by rank, username) from public.leaderboard() where username in ('alice', 'bob', 'kitty')), array['alice', 'bob'], 'leaderboard lists labellers');
 set local role service_role;
 set local request.jwt.claims = '{"role": "service_role"}';
 select is((select count(*) from public.admin_export_labels() where source_uid = 'pool:one'), 2::bigint, 'export carries the source uid');
@@ -91,14 +94,14 @@ reset role;
 set local request.jwt.claims = '';
 
 -- a kit labeller from before the site: a profile waiting for whoever signs up with their email
-select ok(private.import_contributor('Kit@Example.test', 'kitty', 'Kit', 'adi') is not null, 'import makes a claimable profile');
-select is(private.import_contributor('kit@example.test', 'kitty', 'Kit', 'adi'),
+select ok(private.import_contributor('Kit@Example.test', 'kitty', 'Kit', 'test_kit_labeller') is not null, 'import makes a claimable profile');
+select is(private.import_contributor('kit@example.test', 'kitty', 'Kit', 'test_kit_labeller'),
           (select id from public.profiles where username = 'kitty'), 'importing again reuses it');
 select ok(not exists (select 1 from auth.users where email = 'kit@example.test'), 'no sign-in is made for them');
 insert into public.imported_labels (user_id, source_uid, labels, kit, created_at)
 select (select id from public.profiles where username = 'kitty'), 'pool:old' || g, array['tapping'], 'kit-2', now() - interval '3 days'
 from generate_series(1, 3) g;
-select is((select array_agg(username order by rank, username) from public.leaderboard()), array['kitty', 'alice', 'bob'],
+select is((select array_agg(username order by rank, username) from public.leaderboard() where username in ('alice', 'bob', 'kitty')), array['kitty', 'alice', 'bob'],
           'imported kit labels count on the leaderboard');
 set local role anon;
 select is(public.account_status(' KIT@example.test '), 'unclaimed', 'sign-in tells a kit labeller to sign up');
@@ -119,7 +122,7 @@ set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000a", 
 select lives_ok('select public.delete_account()', 'alice deletes her account');
 reset role;
 select ok(not exists (select 1 from auth.users where id = '00000000-0000-0000-0000-00000000000a'), 'her sign-in is gone');
-select is((select array_agg(username order by rank, username) from public.leaderboard()), array['kitty', 'bob'], 'she is off the leaderboard');
+select is((select array_agg(username order by rank, username) from public.leaderboard() where username in ('alice', 'bob', 'kitty')), array['kitty', 'bob'], 'she is off the leaderboard');
 select is((select count(*) from public.labels where user_id = '00000000-0000-0000-0000-00000000000a'), 1::bigint, 'her label stays');
 
 select * from finish();
