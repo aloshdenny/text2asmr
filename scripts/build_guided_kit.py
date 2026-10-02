@@ -40,6 +40,7 @@ def main() -> int:
     ap.add_argument("--lo", type=float, default=0.2)
     ap.add_argument("--hi", type=float, default=0.8)
     ap.add_argument("--kit-id", default="asmr-ear-check-4")
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[], help="label files whose uids may not be guide examples (e.g. a listener said the example was wrong)")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     F = {json.loads(l)["uid"]: json.loads(l)["probs"] for l in open(a.fused, encoding="utf-8")}
@@ -47,10 +48,11 @@ def main() -> int:
     gem = {json.loads(l)["uid"]: set(json.loads(l)["labels"]) for l in open(a.votes / "gemini.jsonl", encoding="utf-8")}
     path = lambda u: a.clips / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', u)}.mp3"
     b64 = lambda u: "data:audio/mpeg;base64," + base64.b64encode(path(u).read_bytes()).decode()
+    banned = {json.loads(l)["uid"] for f in a.exclude for l in open(f, encoding="utf-8")}
     rng = random.Random(4)
     guide, picks, used = [], [], set()
     for lab, hint in HINTS.items():
-        cand = [u for u, c in ch.items() if c and c[0] == lab and u in F and path(u).exists()]
+        cand = [u for u, c in ch.items() if c and c[0] == lab and u in F and path(u).exists() and u not in banned]
         # clearest first: fusion sure and Gemini agrees; rarer classes fall back to Gemini-agreed, then most probable
         tiers = [[u for u in cand if F[u][lab] > 0.95 and lab in gem.get(u, set())],
                  [u for u in cand if lab in gem.get(u, set())], cand]
