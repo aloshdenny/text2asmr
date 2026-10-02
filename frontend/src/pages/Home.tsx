@@ -8,7 +8,7 @@ import { useAuth } from '../lib/auth'
 import { useLeaderboard } from '../lib/stats'
 import { supabase } from '../lib/supabase'
 
-type Progress = { corpus_items: number; human_labelled_items: number; ai_labelled_items: number }
+type Progress = { foundation_items: number; foundation_human_labelled: number; corpus_recordings: number; ai_labelled_recordings: number }
 
 /** Whole percent; anything above zero but under one shows as 1%. */
 const pct = (part: number, whole: number) => {
@@ -29,7 +29,9 @@ export default function Home() {
   useEffect(() => {
     supabase.rpc('dataset_progress').then(({ data }) => setProgress((data as Progress[] | null)?.[0] ?? null))
   }, [])
-  const human = progress ? pct(progress.human_labelled_items, progress.corpus_items) : 0
+  const n = (v?: number) => (v ?? 0).toLocaleString()
+  const human = progress ? pct(progress.foundation_human_labelled, progress.foundation_items) : 0
+  const ai = progress ? pct(progress.ai_labelled_recordings, progress.corpus_recordings) : 0
   const signedIn = Boolean(session && profile?.onboarded)
   return (
     <AppLayout>
@@ -54,8 +56,18 @@ export default function Home() {
 
       <Card className="mt-10 py-8">
         <div className="flex flex-wrap items-start justify-center gap-x-6 gap-y-8 sm:gap-x-24">
-          <Ring percent={human} color="var(--ring-green)" label="data labelled by people" caption="on ASMR Board and the Ear Check kits" />
-          <Ring percent={progress ? 100 - human : 0} color="var(--brand)" label="data labelled by AI" caption="our CLAP-ASMR model" />
+          <Ring
+            percent={human}
+            color="var(--ring-green)"
+            label="labelled by people"
+            caption={progress ? `${n(progress.foundation_human_labelled)} of ${n(progress.foundation_items)} core training clips` : ''}
+          />
+          <Ring
+            percent={ai}
+            color="var(--brand)"
+            label="labelled by AI (CLAP-ASMR)"
+            caption={progress ? `${n(progress.ai_labelled_recordings)} of ${n(progress.corpus_recordings)} recordings` : ''}
+          />
         </div>
       </Card>
 
