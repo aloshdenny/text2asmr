@@ -13,16 +13,22 @@ from pathlib import Path
 import numpy as np
 
 PROMPTS = {
-    "tapping": "ASMR close-up fingernail tapping on a wooden box, crisp gentle taps, quiet room, no talking",
-    "scratching": "ASMR slow scratching on a foam microphone cover, textured scratching sounds, no talking",
-    "crinkling": "ASMR crinkling a plastic wrapper close to the microphone, soft crinkles, no talking",
-    "brushing": "ASMR soft makeup brush strokes on a microphone, gentle brushing, no talking",
-    "liquid": "ASMR slowly pouring water into a glass, gentle water and liquid sounds, no talking",
-    "paper rustling": "ASMR turning the pages of an old book, soft paper rustling, quiet room, no talking",
-    "fabric rustling": "ASMR soft fabric rustling, hands moving over a cotton blanket, close up, no talking",
-    "mouth sounds": "ASMR soft mouth sounds, tongue clicks and lip smacks close to the microphone, no words",
+    "tapping": "binaural stereo ASMR, close-up fingertip tapping on a wooden box, soft gentle taps, quiet room, no talking",
+    "scratching": "binaural stereo ASMR, slow fingernail scratching on a foam microphone cover, textured scratching, no talking",
+    "crinkling": "binaural stereo ASMR, crinkling a plastic wrapper close to the microphone, soft crinkles, no talking",
+    "brushing": "binaural stereo ASMR, soft fluffy makeup brush swept over the microphone, gentle swishing brush strokes, no talking",
+    "liquid": "binaural stereo ASMR, slowly pouring water into a glass, gentle water and liquid sounds, no talking",
+    "paper rustling": "binaural stereo ASMR, turning the pages of an old book, soft paper rustling, quiet room, no talking",
+    "fabric rustling": "binaural stereo ASMR, soft fabric rustling, hands moving over a cotton blanket, close up, quiet room, no talking",
+    "mouth sounds": "binaural stereo ASMR, wet mouth sounds very close to the microphone, soft lip smacks and tongue clicks, no words",
 }
-NEG = "talking, speech, voice, singing, music, hum, buzz, distortion, low quality"
+NEG = "talking, speech, voice, singing, music, hum, buzz, hiss, white noise, distortion, mono, low quality"
+# per class: what the base model drifted to instead (user's ear + AST agreed): steered away and penalised
+CONFUSERS = {"mouth sounds": (["xylophone", "wood block", "marimba", "drum", "plop"], ["Wood block", "Plop", "Marimba, xylophone", "Glockenspiel"]),
+             "brushing": (["pencil", "writing", "scribbling"], ["Writing"]),
+             "tapping": (["metal", "sharp clicks"], ["Wood block", "Drum machine"]),
+             "scratching": (["music", "static"], ["Music", "Static"]),
+             "fabric rustling": (["heartbeat", "throbbing"], ["Heart sounds, heartbeat", "Throbbing"])}
 AST = {"tapping": ["Tap", "Knock"], "scratching": ["Scratch", "Scrape", "Rub"], "crinkling": ["Crumpling, crinkling"],
        "brushing": ["Rub", "Scrape", "Toothbrush"], "liquid": ["Water", "Liquid", "Pour", "Drip", "Splash, splatter", "Trickle, dribble"],
        "paper rustling": ["Rustle", "Crumpling, crinkling", "Tearing"], "fabric rustling": ["Rustle", "Zipper (clothing)"],
@@ -40,6 +46,7 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--cfg", type=float, default=7.0)
     ap.add_argument("--only", default="", help="comma-separated class keys")
+    ap.add_argument("--takes", type=int, default=1, help="best of N per seed: AST picks the take most like the requested sound")
     a = ap.parse_args()
     import torch, soundfile as sf, librosa
     from diffusers import StableAudioPipeline
@@ -67,22 +74,31 @@ def main() -> int:
     rows = []
     for key, prompt in PROMPTS.items():
         if a.only and key not in a.only.split(","): continue
+        neg = NEG + (", " + ", ".join(CONFUSERS[key][0]) if key in CONFUSERS else "")
         for s in range(a.seeds):
-            t0 = time.time()
-            g = torch.Generator("cpu").manual_seed(1000 + s)
-            audio = pipe(prompt, negative_prompt=NEG, num_inference_steps=a.steps, guidance_scale=a.cfg,
-                         audio_end_in_s=a.seconds, num_waveforms_per_prompt=1, generator=g).audios[0]
-            x = audio.float().cpu().numpy().T                                          # (samples, channels)
-            sr = pipe.vae.sampling_rate
-            x = x / max(1e-6, np.abs(x).max()) * 0.5
+            t0, best = time.time(), None
+            for j in range(a.takes):
+                g = torch.Generator("cpu").manual_seed(1000 + 97 * s + j)
+                audio = pipe(prompt, negative_prompt=neg, num_inference_steps=a.steps, guidance_scale=a.cfg,
+                             audio_end_in_s=a.seconds, num_waveforms_per_prompt=1, generator=g).audios[0]
+                x = audio.float().cpu().numpy().T                                      # (samples, channels)
+                sr = pipe.vae.sampling_rate
+                x = x / max(1e-6, np.abs(x).max()) * 0.5
+                mono16 = librosa.resample(x.mean(1), orig_sr=sr, target_sr=16000)
+                with torch.no_grad(): p = torch.sigmoid(ast(**fe([mono16], sampling_rate=16000, return_tensors="pt")).logits)[0].numpy()
+                want = max(p[n2i[n]] for n in AST[key] if n in n2i)
+                bad = max([p[n2i[n]] for n in ("Speech", "Whispering", "Music")] +
+                          [p[n2i[n]] for n in (CONFUSERS.get(key, ([], []))[1]) if n in n2i])
+                score = float(want - 0.5 * bad)
+                if best is None or score > best[0]:
+                    best = (score, x, sr, want, p, j, bad)
+            score, x, sr, want, p, j, bad = best
             f = a.out / f"{key.replace(' ', '_')}_{s}.wav"; sf.write(f, x, sr)
-            mono16 = librosa.resample(x.mean(1), orig_sr=sr, target_sr=16000)
-            with torch.no_grad(): p = torch.sigmoid(ast(**fe([mono16], sampling_rate=16000, return_tensors="pt")).logits)[0].numpy()
-            want = max(p[n2i[n]] for n in AST[key] if n in n2i)
             top = [(i2n[int(i)], round(float(p[i]), 2)) for i in p.argsort()[::-1][:4]]
-            rows.append({"file": f.name, "class": key, "prompt": prompt, "requested_p": round(float(want), 3), "ast_top": top,
-                         "speech_p": round(float(max(p[n2i["Speech"]], p[n2i["Whispering"]])), 3)})
-            log(f"{f.name}: requested-class p {want:.2f} | speech {rows[-1]['speech_p']:.2f} | AST top {top} ({time.time() - t0:.0f} s)")
+            width = float(np.corrcoef(x[:, 0], x[:, 1])[0, 1]) if x.ndim == 2 and x.shape[1] == 2 else 1.0
+            rows.append({"file": f.name, "class": key, "prompt": prompt, "take": j, "requested_p": round(float(want), 3),
+                         "worst_confuser_p": round(float(bad), 3), "ast_top": top, "lr_correlation": round(width, 3)})
+            log(f"{f.name}: take {j + 1}/{a.takes}, requested p {want:.2f}, worst confuser {bad:.2f}, L/R corr {width:.2f} | AST {top} ({time.time() - t0:.0f} s)")
     (a.out / "report.json").write_text(json.dumps(rows, indent=1))
     return 0
 
