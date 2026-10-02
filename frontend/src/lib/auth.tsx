@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 
-export type Profile = { id: string; username: string; display_name: string | null; avatar_url: string | null }
+export type Profile = { id: string; username: string; display_name: string | null; avatar_url: string | null; onboarded: boolean }
 
 type AuthState = {
   session: Session | null
@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const uid = session?.user.id ?? null
   const refreshProfile = useCallback(async () => {
     if (!uid) return
-    const { data } = await supabase.from('profiles').select('id, username, display_name, avatar_url').eq('id', uid).maybeSingle()
+    const { data } = await supabase.from('profiles').select('id, username, display_name, avatar_url, onboarded').eq('id', uid).maybeSingle()
     setProfile(data as Profile | null)
     setProfileOf(uid)
   }, [uid])

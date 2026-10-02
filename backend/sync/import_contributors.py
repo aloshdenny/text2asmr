@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Give the people who labelled Ear Check kits before the site an account, with their kit labels credited.
 
-Each gets an email sign-in with no password (they claim it on the site by setting one: the sign-in page detects
-this), a profile, and their kit labels in public.imported_labels, so the leaderboard and contribution graph count
-them. Their fuse_labels.py name (adi, Alita, ...) is kept as the profile's fusion_name, so anything they label on
+Each gets a profile waiting for whoever signs up with their email (the claim moves it, labels and all, onto the new
+account; see migrations/20261002120000_claim_on_signup.sql), with their kit labels in public.imported_labels so the
+leaderboard and contribution graph count them. Their fuse_labels.py name (adi, Alita, ...) is kept as the profile's fusion_name, so anything they label on
 the site joins their existing labeller rather than a new crowd one. Idempotent: rerunning updates, never duplicates.
 
 The contributors file holds emails, so keep it out of git:
@@ -35,7 +35,7 @@ def main() -> int:
     sql = ["begin;"]
     for p in json.loads(a.people.read_text()):
         sql.append(f"select private.import_contributor({q(p['email'])}, {q(p['username'])}, {q(p.get('display_name'))}, {q(p.get('fusion_name'))});")
-        uid = f"(select id from auth.users where email = lower({q(p['email'])}))"
+        uid = f"(select id from public.profiles where fusion_name = {q(p['fusion_name'])})"
         n = 0
         for f in p["files"]:
             for line in open(a.labels_dir / f, encoding="utf-8"):

@@ -49,19 +49,21 @@ config: `DOCKER_CONFIG=$(mktemp -d) DOCKER_HOST=unix://$HOME/.colima/default/doc
 
 ## Accounts
 
-Email + password. People who labelled Ear Check kits before the site get an account made for them
-(`import_contributors.py`, run with the database URL; emails live in a local file, never in git): no password,
-their kit labels in `imported_labels` (they count on the leaderboard and contribution graph), and their
-fuse_labels.py name kept as `fusion_name`. When they sign in or up, `account_status()` reports `needs_password`
-for exactly those accounts and the site emails them a link to set one. Deleting an account removes the sign-in and
-takes the profile off every public list; the labels stay (under a tombstoned profile).
+Email + password; sign-up signs you straight in (email confirmation off), then onboarding asks for a username and
+an optional picture. People who labelled Ear Check kits before the site have a profile waiting
+(`import_contributors.py`; emails in a local file, never in git) with their kit labels in `imported_labels` and
+their fuse_labels.py name as `fusion_name`. When someone signs up with that email, a trigger on `auth.users` moves
+the profile (and its labels) onto the new account; they keep or change the username in onboarding. Signing in
+with a waiting email reports `unclaimed` (`account_status()`) so the site points them to sign-up -- only those few
+addresses are ever reported. Deleting an account removes the sign-in and takes the profile off every public list;
+the labels stay under a tombstoned profile.
 
 ## Hosted project
 
 Project `t2a` (ref gdjfvjsxsmwjzqpgbapk). Schema: `supabase db push --db-url "$SUPABASE_DB_URL"` (session
 pooler URL). Auth settings that live in the dashboard (or the Management API), mirroring `config.toml`:
 site URL `https://asmrboard.vercel.app`, redirect URL `https://asmrboard.vercel.app/**`, minimum password length
-8, email confirmation on, the two templates in `supabase/templates/`, and custom SMTP (the built-in sender only
+8, **email confirmation off** (Authentication -> Email -> Confirm email), the two templates in `supabase/templates/`, and custom SMTP (the built-in sender only
 mails the project's team members, so set-password emails to other people need it).
 Feed it from the research server (where the pool clips live):
 

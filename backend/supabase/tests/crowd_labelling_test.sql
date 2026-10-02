@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(43);
+select plan(46);
 
 -- four people: a, b, c finished their profile; d signed in but did not
 insert into auth.users (id, email) values
@@ -90,23 +90,28 @@ select is((select labeller from public.admin_export_labels() where username = 'a
 reset role;
 set local request.jwt.claims = '';
 
--- a kit labeller from before the site: account without a password, kit labels credited
-select ok(private.import_contributor('Kit@Example.test', 'kitty', 'Kit', 'adi') is not null, 'import makes the account');
+-- a kit labeller from before the site: a profile waiting for whoever signs up with their email
+select ok(private.import_contributor('Kit@Example.test', 'kitty', 'Kit', 'adi') is not null, 'import makes a claimable profile');
 select is(private.import_contributor('kit@example.test', 'kitty', 'Kit', 'adi'),
-          (select id from auth.users where email = 'kit@example.test'), 'importing again reuses it');
+          (select id from public.profiles where username = 'kitty'), 'importing again reuses it');
+select ok(not exists (select 1 from auth.users where email = 'kit@example.test'), 'no sign-in is made for them');
 insert into public.imported_labels (user_id, source_uid, labels, kit, created_at)
 select (select id from public.profiles where username = 'kitty'), 'pool:old' || g, array['tapping'], 'kit-2', now() - interval '3 days'
 from generate_series(1, 3) g;
 select is((select array_agg(username order by rank, username) from public.leaderboard()), array['kitty', 'alice', 'bob'],
           'imported kit labels count on the leaderboard');
-select is((select sum(labelled) from public.contributions('kitty')), 3::numeric, 'and on the contribution graph');
 set local role anon;
-select is(public.account_status(' KIT@example.test '), 'needs_password', 'an imported account without a password is reported');
-select is(public.account_status('a@example.test'), 'ok', 'ordinary accounts are not');
-select is(public.account_status('nobody@example.test'), 'ok', 'nor unknown emails');
+select is(public.account_status(' KIT@example.test '), 'unclaimed', 'sign-in tells a kit labeller to sign up');
+select is(public.account_status('a@example.test'), 'ok', 'ordinary accounts are not reported');
 reset role;
-update auth.users set encrypted_password = 'x' where email = 'kit@example.test';
-select is(public.account_status('kit@example.test'), 'ok', 'once a password is set, it is a normal account');
+-- signing up with the address, unconfirmed: nothing moves yet; once confirmed, the profile and its labels move over
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000e1', 'kit@example.test');
+select ok(exists (select 1 from public.profiles where username = 'kitty' and claim_email is not null), 'an unconfirmed sign-up claims nothing');
+update auth.users set email_confirmed_at = now() where id = '00000000-0000-0000-0000-0000000000e1';
+select is((select id from public.profiles where username = 'kitty'), '00000000-0000-0000-0000-0000000000e1'::uuid, 'confirmed: the profile is theirs');
+select is((select count(*) from public.imported_labels where user_id = '00000000-0000-0000-0000-0000000000e1'), 3::bigint, 'with its kit labels');
+select is(public.account_status('kit@example.test'), 'ok', 'and the address is no longer reported');
+select is((select sum(labelled) from public.contributions('kitty')), 3::numeric, 'the contribution graph follows');
 
 -- alice deletes her account: off the lists, her label stays (and still exports)
 set local role authenticated;

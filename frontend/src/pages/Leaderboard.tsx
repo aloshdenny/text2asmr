@@ -1,61 +1,75 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import Avatar from '../components/Avatar'
+import { AppLayout } from '../components/Layouts'
+import { Card, EmptyState, Loading, PageHeader, cx } from '../components/ui'
 import { useAuth } from '../lib/auth'
-import { supabase } from '../lib/supabase'
+import { useLeaderboard } from '../lib/stats'
 
-type Row = { rank: number; username: string; display_name: string | null; avatar_url: string | null; labelled: number; last_at: string }
 const PERIODS: [string, number | null][] = [['All time', null], ['30 days', 30], ['7 days', 7]]
 
 export default function Leaderboard() {
   const { profile } = useAuth()
   const [days, setDays] = useState<number | null>(null)
-  const [rows, setRows] = useState<Row[] | null>(null)
-  useEffect(() => {
-    setRows(null)
-    supabase.rpc('leaderboard', { p_days: days, p_limit: 100 }).then(({ data }) => setRows((data as Row[] | null) ?? []))
-  }, [days])
+  const rows = useLeaderboard(days, 100)
   return (
-    <main className="narrow">
-      <div className="page-head">
-        <h1>Leaderboard</h1>
-        <div className="tabs" role="tablist">
-          {PERIODS.map(([name, d]) => (
-            <button key={name} role="tab" aria-selected={days === d} className={days === d ? 'on' : ''} onClick={() => setDays(d)}>
-              {name}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="card board">
-        {rows === null ? (
-          <p className="muted">Loading…</p>
-        ) : rows.length === 0 ? (
-          <p className="muted">Nobody has labelled a clip in this period yet.</p>
-        ) : (
-          <table>
+    <AppLayout>
+      <PageHeader
+        title="Leaderboard"
+        description="Clips labelled, including the Ear Check kits from before the site."
+        actions={
+          <div role="tablist" className="inline-flex rounded-lg border border-hairline bg-surface-muted p-0.5">
+            {PERIODS.map(([name, d]) => (
+              <button
+                key={name}
+                role="tab"
+                aria-selected={days === d}
+                onClick={() => setDays(d)}
+                className={cx(
+                  'h-7 rounded-md px-3 text-[13px] font-medium transition-colors',
+                  days === d ? 'bg-surface text-ink shadow-[0_1px_2px_rgb(0_0_0/0.08)]' : 'text-ink-muted hover:text-ink',
+                )}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        }
+      />
+      {rows === null ? (
+        <Loading />
+      ) : rows.length === 0 ? (
+        <EmptyState title="Nobody has labelled a clip in this period yet." />
+      ) : (
+        <Card padded={false} className="overflow-hidden">
+          <table className="w-full text-sm">
             <thead>
-              <tr><th>#</th><th>Listener</th><th className="num">Clips</th><th className="num hide-sm">Last active</th></tr>
+              <tr className="border-b border-hairline text-left text-xs text-ink-muted">
+                <th className="w-14 px-5 py-2.5 font-medium">#</th>
+                <th className="w-full py-2.5 font-medium">Listener</th>
+                <th className="whitespace-nowrap px-5 py-2.5 text-right font-medium">Clips</th>
+                <th className="hidden whitespace-nowrap px-5 py-2.5 text-right font-medium sm:table-cell">Last active</th>
+              </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-hairline">
               {rows.map((r) => (
-                <tr key={r.username} className={profile?.username === r.username ? 'me' : ''}>
-                  <td className={`rank r${r.rank}`}>{r.rank}</td>
-                  <td>
-                    <Link to={`/u/${r.username}`} className="who">
+                <tr key={r.username} className={cx('transition-colors hover:bg-surface-hover', profile?.username === r.username && 'bg-brand-soft')}>
+                  <td className="px-5 py-3 font-mono text-xs text-ink-muted">{r.rank}</td>
+                  <td className="py-3">
+                    <Link to={`/u/${r.username}`} className="inline-flex items-center gap-2.5">
                       <Avatar name={r.username} url={r.avatar_url} size={26} />
-                      <span>{r.display_name || r.username}</span>
-                      {r.display_name && <span className="muted">@{r.username}</span>}
+                      <span className="font-medium text-ink">{r.display_name || r.username}</span>
+                      <span className="hidden text-ink-muted sm:inline">@{r.username}</span>
                     </Link>
                   </td>
-                  <td className="num"><b>{r.labelled.toLocaleString()}</b></td>
-                  <td className="num muted hide-sm">{new Date(r.last_at).toLocaleDateString()}</td>
+                  <td className="px-5 py-3 text-right font-mono tabular-nums text-ink">{r.labelled.toLocaleString()}</td>
+                  <td className="hidden px-5 py-3 text-right text-ink-muted sm:table-cell">{new Date(r.last_at).toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
-    </main>
+        </Card>
+      )}
+    </AppLayout>
   )
 }

@@ -1,64 +1,51 @@
-import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import Avatar from '../components/Avatar'
 import Heatmap, { streaks } from '../components/Heatmap'
+import { AppLayout } from '../components/Layouts'
+import { ButtonLink, Card, CardHeader, EmptyState, Loading, PageHeader, Stat } from '../components/ui'
 import { useAuth } from '../lib/auth'
-import { supabase, timeZone } from '../lib/supabase'
+import { since, useUserStats } from '../lib/stats'
 
-type Stats = { username: string; display_name: string | null; avatar_url: string | null; joined: string; labelled: number; rank: number | null }
-
+/** A listener's public page. */
 export default function Profile() {
   const { username = '' } = useParams()
   const { profile: me } = useAuth()
-  const [stats, setStats] = useState<Stats | null | undefined>(undefined)
-  const [counts, setCounts] = useState<Map<string, number>>(new Map())
-  useEffect(() => {
-    setStats(undefined)
-    supabase.rpc('profile_stats', { p_username: username }).then(({ data }) => setStats((data as Stats[] | null)?.[0] ?? null))
-    supabase.rpc('contributions', { p_username: username, p_tz: timeZone }).then(({ data }) =>
-      setCounts(new Map(((data as { day: string; labelled: number }[] | null) ?? []).map((r) => [r.day, r.labelled]))),
-    )
-  }, [username])
-
-  if (stats === undefined) return <main className="narrow"><p className="muted">Loading…</p></main>
+  const { stats, counts } = useUserStats(username)
+  if (stats === undefined) return <AppLayout><Loading /></AppLayout>
   if (stats === null)
     return (
-      <main className="narrow">
-        <h1>No such listener</h1>
-        <p className="muted">Nobody goes by @{username}. <Link to="/leaderboard">Back to the leaderboard</Link></p>
-      </main>
+      <AppLayout>
+        <EmptyState title="No such listener" description={`Nobody goes by @${username}.`} action={<ButtonLink to="/leaderboard">Back to the leaderboard</ButtonLink>} />
+      </AppLayout>
     )
-  const year = [...counts.values()].reduce((a, b) => a + b, 0)
   const s = streaks(counts)
+  const year = [...counts.values()].reduce((a, b) => a + b, 0)
   const best = Math.max(0, ...counts.values())
+  const mine = me?.username === stats.username
   return (
-    <main className="profile">
-      <div className="profile-head">
-        <Avatar name={stats.username} url={stats.avatar_url} size={64} />
-        <div>
-          <h1>{stats.display_name || stats.username}</h1>
-          <p className="muted">@{stats.username} · listening since {new Date(stats.joined).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</p>
-        </div>
-        {me?.username === stats.username && (
-          <div className="head-actions">
-            <Link className="btn ghost" to="/settings">Edit profile</Link>
-            <Link className="btn primary" to="/label">Label more</Link>
-          </div>
-        )}
-      </div>
-      <section className="stat-row">
-        <div className="stat"><b>{stats.labelled.toLocaleString()}</b><span>clips labelled</span></div>
-        <div className="stat"><b>{stats.rank ? `#${stats.rank}` : '—'}</b><span>all-time rank</span></div>
-        <div className="stat"><b>{s.current}</b><span>day streak</span></div>
-        <div className="stat"><b>{s.longest}</b><span>longest streak</span></div>
+    <AppLayout>
+      <PageHeader
+        title={
+          <span className="flex items-center gap-3">
+            <Avatar name={stats.username} url={stats.avatar_url} size={40} />
+            <span>
+              {stats.display_name || stats.username}
+              <span className="block text-sm font-normal text-ink-muted">@{stats.username} · listening since {since(stats.joined)}</span>
+            </span>
+          </span>
+        }
+        actions={mine ? <ButtonLink to="/settings" variant="ghost">Edit profile</ButtonLink> : undefined}
+      />
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat value={stats.labelled.toLocaleString()} label="clips labelled" />
+        <Stat value={stats.rank ? `#${stats.rank}` : '—'} label="all-time rank" />
+        <Stat value={`${s.current} ${s.current === 1 ? 'day' : 'days'}`} label="current streak" />
+        <Stat value={best} label="best day" />
       </section>
-      <section className="card">
-        <div className="card-head">
-          <h2>{year.toLocaleString()} clips in the last year</h2>
-          {best > 0 && <span className="muted">best day: {best}</span>}
-        </div>
+      <Card className="mt-3">
+        <CardHeader title={`${year.toLocaleString()} clips in the last year`} />
         <Heatmap counts={counts} />
-      </section>
-    </main>
+      </Card>
+    </AppLayout>
   )
 }
