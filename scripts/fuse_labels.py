@@ -21,17 +21,21 @@ from pathlib import Path
 
 import numpy as np
 
-LABELS = ["breathing", "kissing", "oral sounds", "moaning", "whispering", "normal speech", "tapping", "scratching",
-          "crinkling", "brushing", "liquid", "microphone touching", "sticky", "fabric rustling", "paper rustling",
-          "cutting", "background music", "silence / room tone", "something else"]
+LABELS_V1 = ["breathing", "kissing", "oral sounds", "moaning", "whispering", "normal speech", "tapping", "scratching",
+             "crinkling", "brushing", "liquid", "microphone touching", "sticky", "fabric rustling", "paper rustling",
+             "cutting", "background music", "silence / room tone", "something else"]
+#: "spraying" joined 2026-10-02 (the user heard a spray bottle in a "liquid" chapter clip). Every vote remembers the
+#: menu it was offered; votes cast before that (no "menu" field) abstain on it rather than counting as "no spray".
+LABELS = LABELS_V1[:11] + ["spraying"] + LABELS_V1[11:]
+MENU: dict = {}                                       # (uid, labeller) -> labels it was offered
 V7 = ["breathing", "crinkling", "cutting", "fabric rustling", "microphone touching", "moaning", "oral sounds",
       "paper rustling", "scratching", "sticky", "tapping"]
-CHAPTER = {"tapping", "brushing", "scratching", "liquid", "microphone touching", "crinkling", "sticky", "fabric rustling",
-           "paper rustling", "cutting", "oral sounds"}
+CHAPTER = {"tapping", "brushing", "scratching", "liquid", "spraying", "microphone touching", "crinkling", "sticky",
+           "fabric rustling", "paper rustling", "cutting", "oral sounds"}
 COVERS = {"pipeline": set(V7), "chapter": CHAPTER, "clap": {"breathing", "moaning", "oral sounds"}, "energy": {"silence / room tone"},
           "ast": {"breathing", "oral sounds", "moaning", "whispering", "normal speech", "tapping", "scratching", "crinkling",
-                  "liquid", "fabric rustling", "paper rustling", "cutting", "background music", "silence / room tone",
-                  "microphone touching"}}
+                  "liquid", "spraying", "fabric rustling", "paper rustling", "cutting", "background music",
+                  "silence / room tone", "microphone touching"}}
 
 
 def load_votes(pool: Path, extra: list[Path]) -> dict[str, dict[str, set]]:
@@ -48,7 +52,9 @@ def load_votes(pool: Path, extra: list[Path]) -> dict[str, dict[str, set]]:
         for l in open(f, encoding="utf-8"):
             r = json.loads(l)
             if str(r.get("raw", "")).startswith("ERROR"): continue
-            votes[r.get("clip") or r["uid"]][name.replace("-3.1-pro", "").replace("-v2.6-flash", "")] = set(r["labels"])
+            u, l = r.get("clip") or r["uid"], name.replace("-3.1-pro", "").replace("-v2.6-flash", "")
+            votes[u][l] = set(r["labels"])
+            if r.get("menu"): MENU[(u, l)] = set(r["menu"])
     pf = pool / "pool.jsonl"
     if pf.exists():
         for l in open(pf, encoding="utf-8"):
@@ -67,7 +73,7 @@ def arrays(votes, uids, labellers):
             if l in COVERS and lab not in COVERS[l]: continue
             for i, u in enumerate(uids):
                 v = votes[u].get(l)
-                if v is not None: cov[i] = True; yes[i] = lab in v
+                if v is not None and lab in MENU.get((u, l), LABELS_V1): cov[i] = True; yes[i] = lab in v
             if cov.any(): A[lab][l] = (cov, yes)
     return A
 
@@ -127,6 +133,7 @@ def main() -> int:
             if not r.get("uid") or r.get("skipped"): continue
             who = r.get("who") or f.stem; humans.add(who)
             votes[r["uid"]][who] = set(r["labels"]) & set(LABELS)
+            if r.get("menu"): MENU[(r["uid"], who)] = set(r["menu"])
     labellers = sorted({l for v in votes.values() for l in v}); uids = sorted(votes)
     print(f"{len(uids)} clips; people: {sorted(humans)} ({sum(any(h in votes[u] for h in humans) for u in uids)} clips); "
           f"machines: {[l for l in labellers if l not in humans]}")

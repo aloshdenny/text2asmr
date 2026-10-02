@@ -16,8 +16,10 @@ rows = []
 for f in a.files:
     m = re.search(r'<script type="application/json" id="kit-answers">(.*?)</script>', f.read_text(), re.S)
     data = json.loads(m.group(1)) if m else {}
+    g = re.search(r'<script type="application/json" id="kit-groups">(.*?)</script>', f.read_text(), re.S)
+    menu = [l for _, labs in json.loads(g.group(1)) for l in labs] if g else None   # labels this kit offered
     for cid, v in (data.get("answers") or {}).items():
-        rows.append({"file": f.name, "who": data.get("who"), "kit": data.get("kit"), "clip": cid, **v,
+        rows.append({"file": f.name, "who": data.get("who"), "kit": data.get("kit"), "clip": cid, **v, **({"menu": menu} if menu else {}),
                      **({"stratum": key[cid]["stratum"], "uid": key[cid]["uid"]} if cid in key else {})})
     print(f"{f.name}: {data.get('who')!r}, {len(data.get('answers') or {})} labelled, saved {data.get('saved_at')}", file=sys.stderr)
 out = "".join(json.dumps(r) + "\n" for r in rows)

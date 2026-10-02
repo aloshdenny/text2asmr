@@ -17,6 +17,7 @@ AST_MAP = {"breathing": ["Breathing", "Gasp", "Sigh", "Pant"], "oral sounds": ["
            "normal speech": ["Speech", "Male speech, man speaking", "Female speech, woman speaking", "Conversation", "Narration, monologue"],
            "tapping": ["Tap", "Knock"], "scratching": ["Scratch", "Scrape", "Rub"], "crinkling": ["Crumpling, crinkling"],
            "liquid": ["Water", "Liquid", "Drip", "Pour", "Splash, splatter", "Trickle, dribble", "Slosh", "Squish", "Gurgling", "Stir"],
+           "spraying": ["Spray"],
            "fabric rustling": ["Rustle", "Zipper (clothing)"], "paper rustling": ["Rustle", "Crumpling, crinkling", "Tearing", "Writing"],
            "cutting": ["Chopping (food)", "Scissors", "Cutlery, silverware"], "background music": ["Music"], "silence / room tone": ["Silence"],
            "microphone touching": ["Thump, thud", "Rumble"]}
@@ -68,7 +69,7 @@ def main() -> int:
             p = torch.sigmoid(m(**{k: v.to(dev) for k, v in fe(wavs, sampling_rate=16000, return_tensors="pt").items()}).logits).cpu().numpy()
         for (uid, f), x, pr in zip(b, wavs, p):
             probs = {lab: float(max(pr[n2i[n]] for n in ns if n in n2i)) for lab, ns in AST_MAP.items()}
-            out["ast"].write(json.dumps({"uid": uid, "labels": [k for k, v in probs.items() if v > a.ast_thresh],
+            out["ast"].write(json.dumps({"uid": uid, "menu": sorted(AST_MAP), "labels": [k for k, v in probs.items() if v > a.ast_thresh],
                                          "probs": {k: round(v, 3) for k, v in probs.items()}}) + "\n")
             h = 1600; db = 20 * np.log10(np.sqrt((x[: len(x) // h * h].reshape(-1, h) ** 2).mean(1)) + 1e-9)
             out["energy"].write(json.dumps({"uid": uid, "labels": ["silence / room tone"] if np.percentile(db, 90) < -50 else [],

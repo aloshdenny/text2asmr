@@ -122,7 +122,7 @@ def main() -> int:
             ledger.add(cost)
             with lock:
                 with open(sinks[m], "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"clip": p["uid"], "model": MODELS[m][0], "labels": labels, "raw": raw, "cost": cost}) + "\n")
+                    fh.write(json.dumps({"clip": p["uid"], "model": MODELS[m][0], "labels": labels, "raw": raw, "cost": cost, "menu": LABELS}) + "\n")
         with lock:
             n_done[0] += 1
             if n_done[0] % 250 == 0: log(f"  {n_done[0]} clips labelled, ledger ${ledger.spent:.2f}")

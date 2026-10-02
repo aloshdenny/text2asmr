@@ -22,6 +22,7 @@ HINTS = {"tapping": "fingertips or nails tapping a surface: short, separate taps
          "crinkling": "plastic, foil or a wrapper squeezed: sharp crackly sounds",
          "brushing": "a brush stroked over the mic or a surface: soft swishing",
          "liquid": "water or gel: pouring, dripping, sloshing, bubbles",
+         "spraying": "a spray bottle or mist: short hissy bursts of spray",
          "microphone touching": "fingers on the microphone itself: muffled rubs and thumps",
          "sticky": "tacky surfaces pulling apart: tape, slime, sticky fingers",
          "fabric rustling": "cloth moving: shirts, blankets, gloves",

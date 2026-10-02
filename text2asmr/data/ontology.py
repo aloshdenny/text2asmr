@@ -79,6 +79,9 @@ TRIGGERS: tuple[Trigger, ...] = (
     Trigger("liquid", (
         "pouring liquid", "water sloshing in a bottle", "stirring a drink",
     )),
+    Trigger("spraying", (
+        "a spray bottle spraying mist", "spritzing water from a spray bottle", "aerosol spray hissing",
+    ), transient=True),
     Trigger("mouth sounds", (
         "soft mouth sounds", "lip smacking close to a microphone",
     )),

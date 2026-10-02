@@ -18,11 +18,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 LABELS = ["breathing", "kissing", "oral sounds", "moaning", "whispering", "normal speech", "tapping", "scratching",
-          "crinkling", "brushing", "liquid", "microphone touching", "sticky", "fabric rustling", "paper rustling",
+          "crinkling", "brushing", "liquid", "spraying", "microphone touching", "sticky", "fabric rustling", "paper rustling",
           "cutting", "background music", "silence / room tone", "something else"]
 SYN = {"silence": "silence / room tone", "room tone": "silence / room tone", "mouth sounds": "oral sounds",
        "speech": "normal speech", "talking": "normal speech", "music": "background music", "kiss": "kissing",
-       "page turning": "paper rustling", "mic touching": "microphone touching", "other": "something else"}
+       "page turning": "paper rustling", "spray": "spraying", "spritzing": "spraying", "mic touching": "microphone touching", "other": "something else"}
 PROMPT = ("Listen to this short ASMR audio clip. Which of these sounds can be heard in it? Choose every label that "
           "applies, only from this list: " + "; ".join(LABELS) + ". Answer with JSON only: {\"labels\": [...]}")
 MODELS = {"gemini-3.1-pro": ("google/gemini-3.1-pro-preview", 12), "voxtral-small-24b": ("mistralai/voxtral-small-24b-2507", 8),

@@ -17,7 +17,7 @@ from pathlib import Path
 
 LABEL_GROUPS = [
     ["Voice", ["breathing", "kissing", "oral sounds", "moaning", "whispering", "normal speech"]],
-    ["Triggers", ["tapping", "scratching", "crinkling", "brushing", "liquid", "microphone touching", "sticky",
+    ["Triggers", ["tapping", "scratching", "crinkling", "brushing", "liquid", "spraying", "microphone touching", "sticky",
                   "fabric rustling", "paper rustling", "cutting"]],
     ["Other", ["background music", "silence / room tone", "something else"]],
 ]
