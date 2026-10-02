@@ -12,14 +12,16 @@ import argparse, json, re, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from push_clips import Site, find_audio, sanitize
+from push_clips import Site, load_env_file, find_audio, sanitize
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--plan", type=Path, required=True)
     ap.add_argument("--clips", type=Path, nargs="+", required=True)
+    ap.add_argument("--env-file", type=Path, default=None)
     a = ap.parse_args()
+    load_env_file(a.env_file)
     audio = find_audio(a.clips)
     site = Site()
     out = []

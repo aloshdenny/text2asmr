@@ -14,23 +14,25 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from push_clips import Site
+from push_clips import Site, load_env_file
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--min-labels", type=int, default=20, help="leave out listeners with fewer labels (too few to learn a reliability)")
+    ap.add_argument("--env-file", type=Path, default=None)
     a = ap.parse_args()
+    load_env_file(a.env_file)
     site = Site()
     rows = site.rpc("admin_export_labels")
     menu = [o["key"] for o in sorted(site_menu(site), key=lambda o: o["sort"])]
-    n = Counter(r["username"] for r in rows)
-    keep = [r for r in rows if n[r["username"]] >= a.min_labels]
+    n = Counter(r["labeller"] for r in rows)
+    keep = [r for r in rows if n[r["labeller"]] >= a.min_labels]
     a.out.parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as fh:
         for r in keep:
-            fh.write(json.dumps({"who": f"crowd:{r['username']}", "uid": r["source_uid"], "labels": r["labels"],
+            fh.write(json.dumps({"who": r["labeller"], "username": r["username"], "uid": r["source_uid"], "labels": r["labels"],
                                  "skipped": r["unsure"] and not r["labels"], "unsure": r["unsure"],
                                  "other": r["other_text"], "menu": menu, "kind": r["kind"],
                                  "listen_ms": r["listen_ms"], "at": r["created_at"]}) + "\n")
