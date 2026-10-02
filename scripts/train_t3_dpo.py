@@ -74,8 +74,15 @@ def main() -> int:
     params = [p for p in t3.parameters() if p.requires_grad]
     log(f"trainable LoRA params: {sum(p.numel() for p in params) / 1e6:.1f} M")
 
-    def seq_logps(batch: list[dict], which: str) -> torch.Tensor:
-        """Summed log-prob of each take's speech tokens under the current T3, conditioned as at generation."""
+    def seq_logps(batch: list[dict], which: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Summed log-prob of each take's speech tokens, one sequence at a time. T3 lays out [cond | text padded to
+        the batch's longest | speech], so in a batch a take's speech positions and what they attend to depend on
+        its neighbours: the same take scored -0.63 nats apart between batches, as large as the preference signal.
+        Unpadded, policy and reference log-probs are exactly comparable."""
+        outs = [seq_logps_batch([p], which) for p in batch]
+        return torch.cat([o[0] for o in outs]), torch.cat([o[1] for o in outs])
+
+    def seq_logps_batch(batch: list[dict], which: str) -> tuple[torch.Tensor, torch.Tensor]:
         S, E = hp.start_text_token, hp.stop_text_token
         texts = [torch.cat([torch.tensor([S]), model.tokenizer.text_to_tokens(punc_norm(p["text"])).squeeze(0).cpu(), torch.tensor([E])])
                  for p in batch]
