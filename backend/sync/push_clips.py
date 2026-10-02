@@ -89,7 +89,7 @@ def main() -> int:
     ap.add_argument("--exclude", type=Path, nargs="*", default=[], help="guide plans / uid lists whose clips must not be queued")
     ap.add_argument("--lo", type=float, default=0.2)
     ap.add_argument("--hi", type=float, default=0.8)
-    ap.add_argument("--target-votes", type=int, default=3)
+    ap.add_argument("--target-votes", type=int, default=12, help="first answers a clip needs (the site takes up to max_votes, default 20)")
     ap.add_argument("--batch", required=True)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--env-file", type=Path, default=None, help="file with SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY)")

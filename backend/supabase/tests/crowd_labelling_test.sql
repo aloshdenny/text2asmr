@@ -1,7 +1,10 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(52);
+select plan(63);
+
+-- serving draws (hidden retests, controls) are random: off for the deterministic part, forced on at the end
+update private.settings set value = 0 where key in ('repeat_rate', 'control_rate_max', 'control_rate_min');
 
 -- four people: a, b, c finished their profile; d signed in but did not
 insert into auth.users (id, email) values
@@ -138,6 +141,42 @@ reset role;
 select ok(not exists (select 1 from auth.users where id = '00000000-0000-0000-0000-00000000000a'), 'her sign-in is gone');
 select is((select array_agg(username order by rank, username) from public.leaderboard() where username in ('alice', 'bob', 'kitty')), array['kitty', 'bob'], 'she is off the leaderboard');
 select is((select count(*) from public.labels where user_id = '00000000-0000-0000-0000-00000000000a'), 1::bigint, 'her label stays');
+
+-- a third judge on clip 1 settles part of it: tapping and whispering agreed, "something else" split
+select is((select round(crowd_conf::numeric, 2) from public.clips where audio_path = 't1.mp3'), 0.67, 'trust-weighted consensus on the clip');
+select is((select need < 0.5 from public.clips where audio_path = 't1.mp3'), true, 'quorum reached and partly settled: need drops');
+
+-- controls go first to people we know little about
+set local role service_role;
+set local request.jwt.claims = '{"role": "service_role"}';
+select is(public.admin_add_clips('[{"audio_path": "t3.mp3", "source_uid": "pool:three", "kind": "unsure", "uncertainty": 1.0}]'::jsonb), 1, 'a new clip');
+reset role;
+set local request.jwt.claims = '';
+select is((select target_votes::int || '/' || max_votes::int from public.clips where audio_path = 't3.mp3'), '12/20', 'new clips want 12 to 20 judges');
+update private.settings set value = 1 where key in ('control_rate_max', 'control_rate_min');
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000b", "role": "authenticated"}';
+select is((select audio_path from public.next_clip()), 't2.mp3', 'a control is served ahead of the neediest clip');
+reset role;
+update private.settings set value = 0 where key in ('control_rate_max', 'control_rate_min');
+
+-- hidden retests: after the gap, a clip comes back as a second attempt that does not count toward the quorum
+update private.settings set value = 1 where key = 'repeat_rate';
+update private.settings set value = 0 where key = 'repeat_gap';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
+select is((select audio_path from public.next_clip()), 't1.mp3', 'a clip comes back as a hidden retest');
+reset role;
+update public.assignments set assigned_at = now() - interval '10 seconds';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
+select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 3000)$$, 'the retest is answered');
+reset role;
+select is((select votes from public.clips where audio_path = 't1.mp3'), 3::smallint, 'a retest does not count toward the quorum');
+select is((select count(*) from public.labels l join public.profiles p on p.id = l.user_id where p.username = 'cara' and l.attempt = 2), 1::bigint,
+          'it is kept as a second attempt');
+select lives_ok('select private.refresh_trust()', 'trust refresh runs');
+select ok((select trust between 0 and 1 and trust_evidence > 0 from public.profiles where username = 'cara'), 'cara has a trust score from her retest');
 
 select * from finish();
 rollback;

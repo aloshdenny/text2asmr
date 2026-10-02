@@ -31,6 +31,13 @@ YT_REPO = "aoxo/asmr-yt-chapters"
 def log(m): print(f"[{time.strftime('%F %T')}] {m}", flush=True)
 
 
+def read_clip(path: Path) -> bytes:
+    r"""Clip names can pass Windows' 260-character path limit; the \\?\ prefix lifts it."""
+    p = os.path.abspath(path)
+    if os.name == "nt" and not p.startswith("\\\\?\\"): p = "\\\\?\\" + p
+    with open(p, "rb") as fh: return fh.read()
+
+
 class Ledger:
     def __init__(self, path: Path, cap: float):
         self.path, self.cap, self.lock = path, cap, threading.Lock()
@@ -115,6 +122,8 @@ def main() -> int:
     log(f"{sum(len(v) for v in by_rec.values())} clips in {len(by_rec)} recordings still to label; ledger ${ledger.spent:.2f}/{a.cap}")
     tmp = Path(tempfile.mkdtemp(prefix="pool_", dir=str(a.out)))
     n_done = [0]
+    # clips an earlier run (e.g. --cut-only) already cut into this pool are labelled from disk, not fetched again
+    have_clip = {f.stem: f for f in a.out.glob("pool_*/clips/*.mp3")}
 
     def label_clip(p, mp3: bytes):
         for m in models:
@@ -134,6 +143,10 @@ def main() -> int:
         """Cut the 6 s window straight from the Hub copy: ffmpeg seeks over HTTP and fetches only those seconds
         (whole recordings would be hundreds of GB for 20k clips)."""
         if ledger.over(): return
+        cut = have_clip.get(re.sub(r'[^A-Za-z0-9_.-]', '_', p['uid']))
+        if cut is not None:
+            label_clip(p, read_clip(cut))
+            return
         path = yt_files.get(p["rec"]) if p["repo"] == YT_REPO else p["rec"]
         if not path: return
         url = f"https://huggingface.co/datasets/{p['repo']}/resolve/main/{quote(path)}"
