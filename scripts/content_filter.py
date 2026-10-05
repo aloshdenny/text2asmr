@@ -32,11 +32,14 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpora", nargs="+", default=["aoxo/t2a-mommy", "aoxo/t2a-daddy"])
     ap.add_argument("--pools", type=Path, nargs="*", default=[])
+    ap.add_argument("--transcripts", type=Path, nargs="*", default=[], help="screen_transcripts.py results: their blocked recordings join the list")
     ap.add_argument("--out", type=Path, required=True, help="prefix for <out>_recordings.txt and <out>_uids.txt")
     a = ap.parse_args()
     from huggingface_hub import HfApi
     recs = sorted({f for repo in a.corpora for f in HfApi().list_repo_files(repo, repo_type="dataset")
                    if f.endswith((".m4a", ".mp3")) and blocked_title(f)})
+    for f in a.transcripts:
+        recs = sorted(set(recs) | {r["rec"] for r in map(json.loads, open(f, encoding="utf-8")) if r.get("blocked")})
     blocked = set(recs)
     uids = set()
     for d in a.pools:

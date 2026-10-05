@@ -27,16 +27,18 @@ def held_out(creator: str) -> bool:                      # the creator split tra
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=40)
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[p for p in [Path(r"D:\t2a\fused\blocked_speech_uids.txt")] if p.exists()], help="speech-window uid lists to skip (screen_speech_manifest.py; the server's list is used by default)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--model", default="google/gemini-3.1-pro-preview")
     a = ap.parse_args()
     from huggingface_hub import hf_hub_download
     a.out.mkdir(parents=True, exist_ok=True)
     man = hf_hub_download("aoxo/t2a-speech-v2", "manifests/speech_windows_v2.jsonl", repo_type="dataset", local_dir=str(a.out / ".dl"))
+    drop = {u.strip() for f in a.exclude for u in open(f, encoding="utf-8") if u.strip()}
     by_creator = defaultdict(list)
     for l in open(man, encoding="utf-8"):
         r = json.loads(l)
-        if held_out(r["creator"]) and "[" not in r["text"] and 8 <= r["dur"] <= 12 and len(r["text"].split()) >= 12:
+        if r["uid"] not in drop and held_out(r["creator"]) and "[" not in r["text"] and 8 <= r["dur"] <= 12 and len(r["text"].split()) >= 12:
             by_creator[(r["repo"], r["creator"])].append(r)
     rng = random.Random(11); keys = sorted(by_creator); rng.shuffle(keys)
     # alternate corpora so both voices are represented, one clip per creator

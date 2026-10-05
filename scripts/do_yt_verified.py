@@ -28,6 +28,9 @@ from pathlib import Path
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from content_filter import blocked_title
+
 REPO = "aoxo/asmr-yt-chapters"
 SR = 16_000
 BLOCK_MARKERS = ("Sign in to confirm", "HTTP Error 429", "Too Many Requests", "blocked it in your country",
@@ -108,6 +111,7 @@ def main() -> int:
             for l in a.candidates.open():
                 try: c = json.loads(l)
                 except Exception: continue
+                if blocked_title(c.get("title") or ""): continue      # content filter (content_filter.py)
                 queue.append(c)
         if a.legacy.exists():
             for u in a.legacy.read_text().split():

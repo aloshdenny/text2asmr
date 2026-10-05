@@ -52,6 +52,7 @@ def main() -> int:
     ap.add_argument("--adapter", default="aoxo/text2asmr-t3-v2.1")
     ap.add_argument("--voices", type=Path, required=True, help="dir of (cleaned) reference wavs")
     ap.add_argument("--manifest-repo", default="aoxo/t2a-speech-v2")
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[p for p in [Path(r"D:\t2a\fused\blocked_speech_uids.txt")] if p.exists()], help="speech-window uid lists to skip (screen_speech_manifest.py; the server's list is used by default)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--split", choices=["train", "eval"], default="train")
     ap.add_argument("--n", type=int, default=1500)
@@ -69,7 +70,8 @@ def main() -> int:
     man = [json.loads(l) for l in open(hf_hub_download(a.manifest_repo, "manifests/speech_windows_v2.jsonl", repo_type="dataset",
                                                          local_dir=str(a.out / "dl")), encoding="utf-8")]
     rng = random.Random(a.seed)
-    pool = [r for r in man if (is_eval_creator(r["creator"]) == (a.split == "eval")) and 4 <= r["dur"] <= 18
+    drop = {u.strip() for f in a.exclude for u in open(f, encoding="utf-8") if u.strip()}
+    pool = [r for r in man if r["uid"] not in drop and (is_eval_creator(r["creator"]) == (a.split == "eval")) and 4 <= r["dur"] <= 18
             and len(r["text"].split()) >= 6]
     # tagged windows are where takes go wrong (reading tags, babbling through pauses, laughing): half of the set
     tagged = [r for r in pool if "[" in r["text"]]; plain = [r for r in pool if "[" not in r["text"]]

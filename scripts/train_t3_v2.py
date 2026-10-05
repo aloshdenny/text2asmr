@@ -38,6 +38,7 @@ def is_eval_creator(c: str, pct: float) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, required=True)
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[p for p in [Path(r"D:\t2a\fused\blocked_speech_uids.txt")] if p.exists()], help="speech-window uid lists to skip (screen_speech_manifest.py; the server's list is used by default)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--push", default="")
     ap.add_argument("--epochs", type=float, default=1.0)
@@ -59,9 +60,11 @@ def main() -> int:
     from chatterbox.models.t3.modules.cond_enc import T3Cond
 
     # ---- load every shard (a few GB of int16 tokens; the box has 62 GB) ----
-    rows, dropped = [], {"no prompt": 0, "too long": 0, "text too long": 0}
+    drop = {u.strip() for f in a.exclude for u in open(f, encoding="utf-8") if u.strip()}
+    rows, dropped = [], {"content filter": 0, "no prompt": 0, "too long": 0, "text too long": 0}
     for f in sorted(glob.glob(str(a.data / "shard_*.pt")))[: a.max_shards or None]:
         for r in torch.load(f, weights_only=False):
+            if r.get("uid") in drop: dropped["content filter"] += 1; continue
             if r["prompt"] is None or len(r["prompt"]) < PROMPT_TOKENS: dropped["no prompt"] += 1; continue
             if len(r["speech"]) + 2 > MAX_SPEECH: dropped["too long"] += 1; continue
             t = torch.as_tensor(tok.text_to_tokens(punc_norm(r["text"])).squeeze(0), dtype=torch.long)
