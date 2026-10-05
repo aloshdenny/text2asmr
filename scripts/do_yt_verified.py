@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DO droplet: download -> verify -> non-speech map -> upload, one video at a time.
+"""YouTube fetcher (DO droplet, now the research server): download -> verify -> non-speech map -> upload, one video at a time.
 
 Replaces the plain downloader (do_yt_pipeline.py) as the droplet's only YouTube fetcher, so the politeness
 budget is shared, not doubled. Order of work:
@@ -20,6 +20,8 @@ Throttling is respected, never evaded: at most T2A_YT_PER_HOUR fetches in any ro
 block ("Sign in to confirm", 429, ...) doubles a sleep that a success resets.
 
   python3 do_yt_verified.py --candidates /root/t2a/yt_candidates.jsonl --legacy /root/t2a/yt_remaining.txt
+  python do_yt_verified.py --candidates D:/t2a/yt_dense/yt_candidates.jsonl --work D:/t2a/yt_dense \
+      --vad-model D:/t2a/models/silero_vad.onnx --cookies D:/t2a/cookies.txt --min-free-gb 2   # research server
 """
 from __future__ import annotations
 import argparse, json, os, re, shutil, subprocess, sys, time
@@ -88,7 +90,8 @@ def main() -> int:
     ap.add_argument("--candidates", type=Path, default=Path("/root/t2a/yt_candidates.jsonl"))
     ap.add_argument("--legacy", type=Path, default=Path("/root/t2a/yt_remaining.txt"))
     ap.add_argument("--work", type=Path, default=Path("/root/t2a/ytv"))
-    ap.add_argument("--cookies", type=Path, default=Path("/root/t2a/cookies.txt"))
+    ap.add_argument("--cookies", type=Path, default=Path("/root/t2a/cookies.txt"), help="used only if the file exists")
+    ap.add_argument("--yt-dlp", default=shutil.which("yt-dlp") or "/root/t2a/venv/bin/yt-dlp")
     ap.add_argument("--vad-model", type=Path, default=Path("/root/t2a/models/silero_vad.onnx"))
     ap.add_argument("--max-speech", type=float, default=0.15, help="max VAD speech ratio in a no-talking span")
     ap.add_argument("--min-db", type=float, default=-65.0, help="median 1 s RMS below this = silence (quiet triggers like page turning sit at -55..-63)")
@@ -131,7 +134,7 @@ def main() -> int:
             # discovery keeps merging new candidates; they outrank the legacy queue, so re-plan when they land
             if (a.candidates.stat().st_mtime if a.candidates.exists() else 0) != cand_mtime:
                 log("candidate list changed; re-planning"); break
-            if shutil.disk_usage("/").free / 1e9 < a.min_free_gb:
+            if shutil.disk_usage(a.work).free / 1e9 < a.min_free_gb:
                 log("low disk; pausing 30 min"); time.sleep(1800); break
             now = time.time(); recent[:] = [t for t in recent if now - t < 3600]
             if len(recent) >= per_hour:
@@ -139,10 +142,11 @@ def main() -> int:
                 log(f"hourly ceiling reached; waiting {wait / 60:.0f} min"); time.sleep(max(wait, 60))
             recent.append(time.time())
             vid = c["id"]; flac, info = a.work / f"{vid}.flac", a.work / f"{vid}.info.json"
-            r = subprocess.run(["/root/t2a/venv/bin/yt-dlp", "--cookies", str(a.cookies), "-f", "bestaudio/best", "-x",
+            cookies = ["--cookies", str(a.cookies)] if a.cookies.exists() else []
+            r = subprocess.run([a.yt_dlp, *cookies, "-f", "bestaudio/best", "-x",
                                 "--audio-format", "flac", "--audio-quality", "0", "--write-info-json",
                                 "--sleep-requests", "1.5", "--sleep-interval", "30", "--max-sleep-interval", "120",
-                                "--no-part", "-o", f"{a.work}/%(id)s.%(ext)s", c.get("url") or f"https://www.youtube.com/watch?v={vid}"],
+                                "--no-part", "-o", str(a.work / "%(id)s.%(ext)s"), c.get("url") or f"https://www.youtube.com/watch?v={vid}"],
                                capture_output=True, text=True)
             err = (r.stderr or "")[-400:]
             if any(m in err for m in BLOCK_MARKERS):

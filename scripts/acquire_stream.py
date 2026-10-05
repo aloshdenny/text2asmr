@@ -11,9 +11,9 @@ from huggingface_hub import HfApi, CommitOperationAdd
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--plan", default="expansion_plan.jsonl"); ap.add_argument("--work", type=Path, default=Path("/root/t2a/acq"))
-    ap.add_argument("--max-gb", type=float, default=1000.0, help="stop after this many GB pushed (per run)"); ap.add_argument("--batch-files", type=int, default=12); ap.add_argument("--min-free-gb", type=float, default=4.0)
+    ap.add_argument("--max-gb", type=float, default=1000.0, help="stop after this many GB pushed in this run (the ledger total does not count)"); ap.add_argument("--batch-files", type=int, default=12); ap.add_argument("--min-free-gb", type=float, default=4.0)
     ap.add_argument("--only-repo", default=""); ap.add_argument("--cap-files", type=int, default=150); a = ap.parse_args(); a.work.mkdir(parents=True, exist_ok=True)
-    api = HfApi(); ledger = a.work / "acquired.jsonl"; done_creators = set(); pushed_gb = 0.0
+    api = HfApi(); ledger = a.work / "acquired.jsonl"; done_creators = set(); pushed_gb = 0.0; run_gb = 0.0
     if ledger.exists():
         for l in open(ledger): r = json.loads(l); done_creators.add(r["uploader"]); pushed_gb += r["gb"]
     existing = {}
@@ -26,11 +26,11 @@ def main():
     for p in plan:
         up, repo = p["uploader"], p["repo"]
         if up in done_creators or up.lower() in existing[repo]: continue
-        if pushed_gb >= a.max_gb: log("byte budget reached"); break
+        if run_gb >= a.max_gb: log("byte budget reached"); break
         try:
             html = dl.get_profile(session, up); pages = dl.extract_audio_pages(html, up)[: max(p["take_files"], a.cap_files)]
         except Exception as e: log(f"{up}: profile failed {type(e).__name__}"); continue
-        cdir = a.work / dl.safe_filename(up); cdir.mkdir(exist_ok=True); ops = []; n_files = 0; gb = 0.0; skipped_titles = 0
+        cdir = a.work / dl.safe_filename(up); cdir.mkdir(exist_ok=True); ops = []; n_files = 0; gb = 0.0; skipped_titles = 0; full = False
         def flush():
             nonlocal ops
             if not ops: return
@@ -43,7 +43,9 @@ def main():
                 except Exception: pass
             ops = []
         for page in pages:
-            if shutil.disk_usage("/").free / 1e9 < a.min_free_gb: flush()
+            if shutil.disk_usage(a.work).free / 1e9 < a.min_free_gb:
+                flush()   # committing frees our own files; if the drive is still short, something else filled it
+                if shutil.disk_usage(a.work).free / 1e9 < a.min_free_gb: full = True; break
             # a post's URL carries its title: never fetch one that puts minors, age play or incest in a sexual scene
             if blocked_title(page.rstrip("/").split("/")[-1].replace("-", " ")):
                 skipped_titles += 1; continue
@@ -60,9 +62,10 @@ def main():
                 ops.append(CommitOperationAdd(path_in_repo=f"{dl.safe_filename(up)}/{fname}", path_or_fileobj=str(out))); n_files += 1; gb += sz / 1e9
                 if len(ops) >= a.batch_files: flush()
             except Exception as e: log(f"{up}: {type(e).__name__} on {page[-50:]}")
-        flush(); shutil.rmtree(cdir, ignore_errors=True); pushed_gb += gb
+        flush(); shutil.rmtree(cdir, ignore_errors=True); pushed_gb += gb; run_gb += gb
         with open(ledger, "a") as f: f.write(json.dumps({"uploader": up, "repo": repo, "files": n_files, "gb": round(gb, 3), "ts": time.strftime("%F %T")}) + "\n")
         log(f"{up} -> {repo.split('/')[-1]}: {n_files} files, {gb:.2f} GB (total {pushed_gb:.1f} GB)"
             + (f"; {skipped_titles} posts skipped by the content filter" if skipped_titles else ""))
+        if full: log(f"drive below {a.min_free_gb} GB free: stopping"); break
     log("ACQUIRE_DONE")
 if __name__ == "__main__": main()

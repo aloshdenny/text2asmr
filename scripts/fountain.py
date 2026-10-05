@@ -7,6 +7,8 @@ Network-only, sized for the 1 vCPU / ~15 GB DO droplet: it never holds more than
 every creator is committed to the Hub before the next one starts.
 
   python3 fountain.py --target 150000 --cycle-gb 40 --state /root/t2a/fountain
+  python fountain.py --state D:/t2a/fountain --repo-dir D:/t2a/text2asmr/scripts --python D:/t2a/venv/Scripts/python.exe \
+      --cycle-gb 20 --min-free-gb 1.5          # research server: little free disk, so small cycles
 
 Acquisition alone does not balance anything: it buys *audio*.  That audio only becomes labeled clips after
 transcription (Modal/tinkerspace) and Qwen3-Omni labeling, so the counts this loop reads lag the downloads
@@ -88,6 +90,7 @@ def main() -> int:
     ap.add_argument("--per-side", action="store_true", help="require the target per gender, not combined")
     ap.add_argument("--cycle-gb", type=float, default=40.0, help="GB to acquire per cycle")
     ap.add_argument("--cap-files", type=int, default=60, help="files per creator: breadth over depth")
+    ap.add_argument("--min-free-gb", type=float, default=4.0, help="acquisition stops when the work drive falls below this")
     ap.add_argument("--pages", type=int, default=60, help="search pages per query; a cycle must finish, so keep it small")
     ap.add_argument("--min-seen", type=int, default=3)
     ap.add_argument("--sleep", type=int, default=3600, help="seconds between cycles")
@@ -134,7 +137,8 @@ def main() -> int:
             time.sleep(max(a.sleep, 6 * 3600)); continue
 
         rc = run([a.python, str(a.repo_dir / "acquire_stream.py"), "--plan", str(plan),
-                  "--work", str(a.state / "acq"), "--max-gb", str(a.cycle_gb), "--cap-files", str(a.cap_files)],
+                  "--work", str(a.state / "acq"), "--max-gb", str(a.cycle_gb), "--cap-files", str(a.cap_files),
+                  "--min-free-gb", str(a.min_free_gb)],
                  cwd=a.state, timeout=20 * 3600)
         log(f"  acquire rc={rc}")
 
