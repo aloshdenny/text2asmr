@@ -59,13 +59,17 @@ def class_counts(cache: Path) -> Counter:
     return c
 
 
-def refresh_exclusions(path: Path) -> int:
-    """Every creator already in either corpus; discovery refuses all of them, so the loop only ever adds breadth."""
+def refresh_exclusions(path: Path, ledger: Path) -> int:
+    """Every creator already in either corpus, plus every creator acquisition already tried (deleted profiles yield
+    nothing and would otherwise be planned again every cycle); discovery refuses all of them, so the loop only ever
+    adds breadth."""
     from huggingface_hub import HfApi
     api = HfApi(); names = set()
     for repo in (MOMMY, DADDY):
         for f in api.list_repo_files(repo, repo_type="dataset"):
             if f.endswith(".m4a"): names.add(f.split("/")[0].lower())
+    if ledger.exists():
+        names |= {json.loads(l)["uploader"].lower() for l in open(ledger) if l.strip()}
     path.write_text("\n".join(sorted(names)) + "\n")
     return len(names)
 
@@ -119,8 +123,8 @@ def main() -> int:
             log(f"  every class is at target ({a.target} vocal / {phys_target} physical); fountain done"); break
         log(f"  short: {short}")
 
-        n_excl = refresh_exclusions(a.state / "existing_creators.txt")
-        log(f"  exclusion list: {n_excl} creators already in the corpora")
+        n_excl = refresh_exclusions(a.state / "existing_creators.txt", a.state / "acq" / "acquired.jsonl")
+        log(f"  exclusion list: {n_excl} creators already in the corpora or already tried")
 
         # Breadth queries stay in the mix (deficit tags only lift yield ~1.3x; new creators are what scales),
         # but only one breadth group per cycle -- running all four took >6 h and never reached acquisition.

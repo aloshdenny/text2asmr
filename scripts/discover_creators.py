@@ -22,6 +22,8 @@ QUERIES = {
     "_generic_m": ["M4F", "M4A", "M4M", "boyfriend", "bfe", "daddy", "husband", "older man", "male moaning", "mdom", "gentle mdom", "comfort m4f", "sleep aid m4f", "roleplay m4f", "script fill m4f", "whisper m4f", "praise m4f", "aftercare m4f"],
 }
 TAGPAT = {"kissing": r"kiss|mwah|smooch|makeout|making out", "moaning": r"moan|whimper|orgasm", "mouth sounds": r"mouth|wet sound|lick|slurp|sloppy|tongue|smack", "breathing": r"breath|pant"}
+PHYSPAT = {"tapping": r"tapping|taps\b", "scratching": r"scratch", "brushing": r"brush", "liquid": r"water|liquid|pouring|drinking",
+           "crinkling": r"crinkl"}
 # no queries that steer towards sibling or teacher/student scenes: acquire_stream.py's title filter blocks those posts anyway
 def route(cat: str, title: str):
     c = (cat or "").lower(); t = (title or "").upper()
@@ -64,7 +66,7 @@ def main():
         hits = Counter(); routes = Counter(); mins = 0
         for it in its:
             text = " ".join([it.get("title", "")] + (it.get("tags") or [])).lower()
-            for lab, pat in TAGPAT.items():
+            for lab, pat in {**TAGPAT, **PHYSPAT}.items():
                 if re.search(pat, text): hits[lab] += 1
             r = route(it.get("category"), it.get("title")); routes[r or "?"] += 1; mins += (it.get("duration") or 0)
         matched = sum(hits.values())
@@ -73,7 +75,9 @@ def main():
         if repo == "?": continue
         take = min(len(its), a.cap_files); est_gb = mins / max(1, len(its)) * take * a.mb_per_min / 1024
         plan.append({"uploader": up, "repo": repo, "posts_seen": len(its), "matched_posts": matched, "hits": dict(hits), "minutes_seen": mins, "take_files": take, "est_gb": round(est_gb, 2),
-                     "score": hits["kissing"] * 3 + hits["moaning"] * 2 + hits["mouth sounds"] * 1.5 + hits["breathing"], "sample_urls": [it["url"] for it in its[:3]]})
+                     "score": hits["kissing"] * 3 + hits["moaning"] * 2 + hits["mouth sounds"] * 1.5 + hits["breathing"] + 3 * sum(hits[c] for c in PHYSPAT),
+                     "sample_urls": [it["url"] for it in its[:3]],
+                     "urls": [it["url"] for it in its]})   # acquire_stream.py falls back to these when the profile page is empty
     plan.sort(key=lambda p: -p["score"])
     with open(a.out, "w") as f:
         for p in plan: f.write(json.dumps(p) + "\n")

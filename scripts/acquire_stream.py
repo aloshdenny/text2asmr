@@ -29,6 +29,8 @@ def main():
         if run_gb >= a.max_gb: log("byte budget reached"); break
         try:
             html = dl.get_profile(session, up); pages = dl.extract_audio_pages(html, up)[: max(p["take_files"], a.cap_files)]
+            # a deleted profile still leaves posts reachable from the search index; most 404, some still serve audio
+            if not pages and p.get("urls"): pages = p["urls"][: a.cap_files]; log(f"{up}: profile empty, trying {len(pages)} indexed posts")
         except Exception as e: log(f"{up}: profile failed {type(e).__name__}"); continue
         cdir = a.work / dl.safe_filename(up); cdir.mkdir(exist_ok=True); ops = []; n_files = 0; gb = 0.0; skipped_titles = 0; full = False
         def flush():
