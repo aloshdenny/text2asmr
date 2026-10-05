@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(12);
 
 update public.clips set active = false;
 set local role service_role;
@@ -34,6 +34,10 @@ select is((select count(*) from public.admin_reload_candidates(5000) where audio
 select public.admin_set_active(array(select id from ids where audio_path = 'w-unsure.mp3'), false);
 select is((select array_agg(audio_path order by audio_path) from public.admin_reload_candidates(5000) where audio_path like 'w-%'), array['w-conf.mp3', 'w-unsure.mp3'],
           'reload candidates: taken-down clips people still need, neediest first');
+-- a blocked clip comes down and never comes back
+select is((select count(*) from public.admin_block_clips(array['pool:w-unsure'])), 1::bigint, 'blocking takes the clip down');
+select is((select count(*) from public.admin_reload_candidates(5000) where audio_path = 'w-unsure.mp3'), 0::bigint,
+          'a blocked clip is never a reload candidate');
 reset role;
 
 set local role anon;

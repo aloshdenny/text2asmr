@@ -83,14 +83,15 @@ def build_rows(a) -> dict[str, list[dict]]:
     files = {}
     for d in a.clips:
         for f in glob.glob(str(d / "pool_*" / "clips" / "*.mp3")): files.setdefault(Path(f).stem, f)
-    fused = {json.loads(l)["uid"]: json.loads(l)["probs"] for l in open(a.fused, encoding="utf-8")}
+    drop = {u.strip() for f in a.exclude for u in open(f, encoding="utf-8") if u.strip()}
+    fused = {u: p for u, p in ((json.loads(l)["uid"], json.loads(l)["probs"]) for l in open(a.fused, encoding="utf-8")) if u not in drop}
     # people: one vote per person per clip, over that person's menu
     votes: dict[str, dict[str, tuple[set, set]]] = defaultdict(dict)
     for f in a.humans:
         crowd_file = "crowd" in f.name
         for l in open(f, encoding="utf-8"):
             r = json.loads(l)
-            if not r.get("uid") or r.get("skipped"): continue
+            if not r.get("uid") or r.get("skipped") or r["uid"] in drop: continue
             who = r.get("who") or f.stem
             menu = set(r.get("menu") or (LABELS if crowd_file or who.startswith("crowd:") else OLD_MENU))
             votes[r["uid"]][who] = (set(r["labels"]) & set(LABELS), menu)
@@ -134,6 +135,7 @@ def main() -> int:
     ap.add_argument("--clips", type=Path, nargs="+", required=True, help="pool dirs: clips under pool_*/clips")
     ap.add_argument("--trigger-manifest", type=Path, required=True)
     ap.add_argument("--external", type=Path, default=None, help="human-labelled trigger clips (clips.json) for the final check")
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[], help="uid lists never to train or evaluate on (content_filter.py)")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--freeze-tower", action="store_true", help="baseline: train the head on frozen v7 embeddings")
     ap.add_argument("--mix", default="0.25,0.35,0.40", help="batch shares: human, trigger, replay")
