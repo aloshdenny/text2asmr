@@ -14,7 +14,7 @@
       --budget-mb 900 [--dry-run]
 """
 from __future__ import annotations
-import argparse, glob, json, re, sys, uuid
+import argparse, glob, json, os, re, sys, time, uuid
 from pathlib import Path
 
 import requests
@@ -26,6 +26,22 @@ MB = 1024 * 1024
 
 
 def safe(uid: str) -> str: return re.sub(r"[^A-Za-z0-9_.-]", "_", uid)
+
+
+def size_of(path: str) -> int:
+    """File size; clip names are full source paths, past Windows' 260-char limit without the \\\\?\\ prefix."""
+    p = os.path.abspath(path)
+    if os.name == "nt" and not p.startswith("\\\\?\\"): p = "\\\\?\\" + p
+    return os.path.getsize(p)
+
+
+def upload(site: Site, name: str, path: str) -> None:
+    """Upload with a few retries: a single slow response from storage should not end the run."""
+    for i in range(4):
+        try: site.upload("clips", name, read_audio(Path(path))); return
+        except Exception:
+            if i == 3: raise
+            time.sleep(10 * (i + 1))
 
 
 def local_files(roots: list[Path]) -> dict[str, str]:
@@ -86,9 +102,9 @@ def main() -> int:
                 seen.add(r["clip_id"])
                 f = files.get(safe(r["source_uid"]))
                 if not f: missing += 1; continue
-                size = Path(f).stat().st_size
+                size = size_of(f)
                 if size > room: full = True; break
-                if not a.dry_run: site.upload("clips", r["audio_path"], read_audio(Path(f)))
+                if not a.dry_run: upload(site, r["audio_path"], f)
                 page.append(r["clip_id"]); room -= size
             if page and not a.dry_run: site.rpc("admin_set_active", p_clips=page, p_active=True)
             back += len(page)
@@ -105,7 +121,7 @@ def main() -> int:
 
         def up(r: dict) -> dict:
             name = f"{uuid.uuid4()}.mp3"
-            if not a.dry_run: site.upload("clips", name, read_audio(Path(r["path"])))
+            if not a.dry_run: upload(site, name, r["path"])
             return {"audio_path": name, "source_uid": r["uid"], "kind": r.get("kind", "unlabelled"),
                     "uncertainty": round(float(r.get("uncertainty", 0.5)), 4), "target_votes": a.target_votes,
                     "batch": a.fill_batch or "working-set", "info": r.get("info", {}), **({"core": False} if a.not_core else {})}
@@ -115,7 +131,7 @@ def main() -> int:
             while i < len(new) and room > 0:
                 chunk = []
                 while i < len(new) and len(chunk) < 200:
-                    size = Path(new[i]["path"]).stat().st_size
+                    size = size_of(new[i]["path"])
                     if size > room: room = 0; break
                     chunk.append(new[i]); room -= size; i += 1
                 if not chunk: break
