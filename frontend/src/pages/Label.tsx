@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import HeadphonesPrompt from '../components/HeadphonesPrompt'
+import Interlude, { type InterludeKind } from '../components/Interlude'
 import { AppLayout } from '../components/Layouts'
 import { Button, ButtonLink, Card, EmptyState, Icon, Kbd, Spinner, cx } from '../components/ui'
 import { KEYS, loadMenu, supabase, type Option } from '../lib/supabase'
 
 type Clip = { clip_id: string; audio_path: string; duration_s: number }
-type Phase = 'loading' | 'ready' | 'empty' | 'error'
+type Phase = 'loading' | 'ready' | 'interlude' | 'empty' | 'error'
+type Due = { kind: InterludeKind; audio_a: string; audio_b: string | null }
 const SESSION_GOAL = 25
 
 export default function Label() {
@@ -26,6 +28,7 @@ export default function Label() {
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
   const [intro, setIntro] = useState(true) // the headphones prompt, once per visit
+  const [inter, setInter] = useState<{ kind: InterludeKind; a: string; b: string | null } | null>(null)
   const audio = useRef<HTMLAudioElement>(null)
   const otherRef = useRef<HTMLInputElement>(null)
 
@@ -41,7 +44,19 @@ export default function Label() {
     setOther('')
     setUnsure(false)
     setTime({ at: 0, dur: 0 })
-    const { data, error } = await supabase.rpc('next_clip')
+    // every 8-17 labels the server has a quick break (Real or AI / Which is hotter) instead; the clip stays assigned
+    const [due, clipRes] = await Promise.all([supabase.rpc('next_interlude'), supabase.rpc('next_clip')])
+    const it = (due.data as Due[] | null)?.[0]
+    if (it) {
+      const sign = (path: string) => supabase.storage.from('clips').createSignedUrl(path, 900)
+      const [sa, sb] = await Promise.all([sign(it.audio_a), it.audio_b ? sign(it.audio_b) : null])
+      if (sa.data && (!it.audio_b || sb?.data)) {
+        setInter({ kind: it.kind, a: sa.data.signedUrl, b: sb?.data?.signedUrl ?? null })
+        return setPhase('interlude')
+      }
+      await supabase.rpc('skip_interlude') // its audio would not load: carry on labelling
+    }
+    const { data, error } = clipRes
     if (error) {
       setError(error.message)
       return setPhase('error')
@@ -131,7 +146,7 @@ export default function Label() {
   }
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-    if (intro) return // the headphones prompt has the keyboard (Enter / Space on its button, Esc)
+    if (intro || phase === 'interlude') return // the headphones prompt / the interlude has the keyboard
     const t = e.target as HTMLElement
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) {
       if (e.key === 'Enter') {
@@ -187,6 +202,19 @@ export default function Label() {
         <EmptyState title="You’ve heard every clip" description="Thank you, that’s the whole queue. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
       )}
       {phase === 'error' && <EmptyState title="Something went wrong" description={error} action={<Button onClick={next}>Try again</Button>} />}
+      {phase === 'interlude' && inter && (
+        <Interlude
+          kind={inter.kind}
+          srcA={inter.a}
+          srcB={inter.b}
+          autoPlay={!intro}
+          onError={flash}
+          onDone={() => {
+            setInter(null)
+            next()
+          }}
+        />
+      )}
 
       {(phase === 'ready' || phase === 'loading') && (
         <>

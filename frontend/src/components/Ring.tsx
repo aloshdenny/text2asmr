@@ -14,7 +14,7 @@ export default function Ring({ percent, color, label, caption }: { percent: numb
   return (
     <figure className="flex w-[140px] flex-col items-center gap-3 sm:w-60">
       <div className="relative" style={{ width: size, height: size }}>
-        <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" role="img" aria-label={`${percent}% ${label}`}>
+        <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" role="img" aria-label={`${percent.toFixed(1)}% ${label}`}>
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-hover)" strokeWidth={stroke} />
           <circle
             className="ring-arc"
@@ -29,7 +29,7 @@ export default function Ring({ percent, color, label, caption }: { percent: numb
             strokeDashoffset={c * (1 - Math.min(100, Math.max(0, shown)) / 100)}
           />
         </svg>
-        <span className="absolute inset-0 flex items-center justify-center text-[28px] font-semibold tracking-tight text-ink tabular-nums">{percent}%</span>
+        <span className="absolute inset-0 flex items-center justify-center text-[28px] font-semibold tracking-tight text-ink tabular-nums">{percent.toFixed(1)}%</span>
       </div>
       <figcaption className="text-center">
         <span className="block text-sm font-medium text-ink">{label}</span>

@@ -10,10 +10,33 @@ import { supabase } from '../lib/supabase'
 
 type Progress = { foundation_items: number; foundation_human_labelled: number; corpus_recordings: number; ai_labelled_recordings: number }
 
-/** Whole percent; anything above zero but under one shows as 1%. */
+/** Percent to one decimal place; anything above zero but under 0.1 shows as 0.1%. */
 const pct = (part: number, whole: number) => {
   const p = whole > 0 ? (100 * part) / whole : 0
-  return p > 0 && p < 1 ? 1 : Math.round(p)
+  return p > 0 && p < 0.1 ? 0.1 : Math.round(p * 10) / 10
+}
+
+const PROGRESS_KEY = 'asmrboard-progress'
+
+/** The last numbers this browser saw, so the rings draw on the first frame (storage can be unavailable). */
+function cachedProgress(): Progress | null {
+  try {
+    return JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? 'null') as Progress | null
+  } catch {
+    return null
+  }
+}
+
+/** The ring numbers: the CDN-cached /api/progress (a once-a-day snapshot), or the RPC where that route is absent (dev). */
+async function fetchProgress(): Promise<Progress | null> {
+  try {
+    const r = await fetch('/api/progress')
+    if (r.ok && r.headers.get('content-type')?.includes('json')) return (await r.json()) as Progress
+  } catch {
+    /* fall through to the RPC */
+  }
+  const { data } = await supabase.rpc('dataset_progress')
+  return (data as Progress[] | null)?.[0] ?? null
 }
 
 const STEPS = [
@@ -24,10 +47,18 @@ const STEPS = [
 
 export default function Home() {
   const { session, profile } = useAuth()
-  const [progress, setProgress] = useState<Progress | null>(null)
+  const [progress, setProgress] = useState<Progress | null>(cachedProgress)
   const top = useLeaderboard(30, 5)
   useEffect(() => {
-    supabase.rpc('dataset_progress').then(({ data }) => setProgress((data as Progress[] | null)?.[0] ?? null))
+    fetchProgress().then((p) => {
+      if (!p) return
+      setProgress(p)
+      try {
+        localStorage.setItem(PROGRESS_KEY, JSON.stringify(p))
+      } catch {
+        /* private mode: just no head start next time */
+      }
+    })
   }, [])
   const n = (v?: number) => (v ?? 0).toLocaleString()
   const human = progress ? pct(progress.foundation_human_labelled, progress.foundation_items) : 0
