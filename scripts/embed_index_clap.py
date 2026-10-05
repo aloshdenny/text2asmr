@@ -19,7 +19,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from score_pool_clap import FRAMES, MELS, Scorer, repeatpad
-from pool_local_labels import load
+from pool_local_labels import load, try_load
 
 REPO = "aoxo/clap-ft-data"
 
@@ -90,8 +90,9 @@ def clips(sc: Scorer, a) -> None:
         name = lambda r: re.sub(r"[^A-Za-z0-9_.-]", "_", r["uid"])
         items = [(r, files[name(r)]) for r in map(json.loads, open(pool / "pool.jsonl", encoding="utf-8")) if name(r) in files]
         for i in range(0, len(items), a.chunk):
-            b = items[i:i + a.chunk]
-            E.append(sc.embed_mels(sc.mels(np.stack([repeatpad(load(f, 48000)) for _, f in b]))).half().cpu().numpy())
+            b = [(r, w) for r, f in items[i:i + a.chunk] if (w := try_load(f, 48000)) is not None]  # skips one-frame cuts
+            if not b: continue
+            E.append(sc.embed_mels(sc.mels(np.stack([repeatpad(w) for _, w in b]))).half().cpu().numpy())
             rows += [{"uid": r["uid"], "label": r.get("label"), "src": r.get("src"), "pool": pool.name} for r, _ in b]
         log(f"clips: {pool} -> {len(items)}")
     np.concatenate(E).tofile(a.out / "clips.f16")

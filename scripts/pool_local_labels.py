@@ -37,6 +37,13 @@ def load(f: str, sr: int) -> np.ndarray:
     return librosa.resample(y.mean(1), orig_sr=s, target_sr=sr) if s != sr else y.mean(1)
 
 
+def try_load(f: str, sr: int) -> np.ndarray | None:
+    """load(), or None for a clip too broken or short to score (a cut that came out as one mp3 frame)."""
+    try: y = load(f, sr)
+    except Exception as e: log(f"  skip unreadable {Path(f).name[:80]}: {type(e).__name__}"); return None
+    return y if len(y) >= sr // 10 else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", type=Path, required=True)
@@ -63,8 +70,9 @@ def main() -> int:
         scorer = Scorer(a.clap, dev=dev); classes = scorer.classes + ["__bg__"]
     out = {k: open(a.pool / f"{k}.jsonl", "w", encoding="utf-8") for k in (["ast", "energy"] + (["clap"] if scorer else []))}
     for i in range(0, len(items), a.batch):
-        b = items[i:i + a.batch]
-        wavs = [load(f, 16000) for _, f in b]
+        b = [(it, w) for it in items[i:i + a.batch] if (w := try_load(it[1], 16000)) is not None]
+        if not b: continue
+        b, wavs = [it for it, _ in b], [w for _, w in b]
         with torch.no_grad():
             p = torch.sigmoid(m(**{k: v.to(dev) for k, v in fe(wavs, sampling_rate=16000, return_tensors="pt").items()}).logits).cpu().numpy()
         for (uid, f), x, pr in zip(b, wavs, p):

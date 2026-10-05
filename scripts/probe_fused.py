@@ -64,7 +64,7 @@ def main() -> int:
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     F = {json.loads(l)["uid"]: json.loads(l)["probs"] for l in open(a.fused, encoding="utf-8")}
-    sets = {name: load_emb(a.emb, name) for name in ("clips", "indomain", "yt") if (a.emb / f"{name}.jsonl").exists()}
+    sets = {name: load_emb(a.emb, name) for name in ("clips", "indomain", "yt", "corpus", "ytdense") if (a.emb / f"{name}.jsonl").exists()}
     where = {}                         # a labelled clip's own audio first (what the labellers heard), else its mel row
     for name, (rows, _) in sets.items():
         for i, r in enumerate(rows):
@@ -109,7 +109,7 @@ def main() -> int:
     torch.save(lin.state_dict(), a.out / "probe.pt")
     mine = defaultdict(list)
     with open(a.out / "rows.jsonl", "w", encoding="utf-8") as fh:
-        for name in ("indomain", "yt"):
+        for name in ("indomain", "yt", "corpus", "ytdense"):  # corpus / ytdense: embed_corpus_clap.py (new recordings, dense YT windows)
             if name not in sets: continue
             rows, E = sets[name]; P = predict(lin, E)
             for r, p in zip(rows, P):

@@ -495,7 +495,9 @@ def main() -> int:
     ap.add_argument("--script", help="text file, or the script itself")
     ap.add_argument("--restitch", type=Path, default=None,
                     help="a <out>.takes dir from an earlier render: re-stitch its saved takes, no model, no new takes")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="output wav (not with --batch)")
+    ap.add_argument("--batch", type=Path, default=None,
+                    help="jsonl of {ref, script, out}: render each with one loaded model (rows whose out exists are skipped)")
     ap.add_argument("--adapter", default="aoxo/text2asmr-t3-v2", help="HF repo or local dir; '' for the base model")
     ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     ap.add_argument("--max-chunk-s", type=float, default=18.0)
@@ -534,7 +536,25 @@ def main() -> int:
         import perth
         finish(assemble(pieces, chunks, sr, a, pauses), sr, a, perth.PerthImplicitWatermarker())
         return 0
-    if not (a.ref and a.script): ap.error("--ref and --script are required unless --restitch is given")
+    if a.batch:                                              # many scripts, one model load
+        model = load(a.device, a.adapter or None)
+        for line in open(a.batch, encoding="utf-8"):
+            r = json.loads(line)
+            if Path(r["out"]).exists(): continue
+            a.ref, a.script, a.out = r["ref"], r["script"], r["out"]
+            Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+            try: render(model, a, pauses)
+            except Exception as e: log(f"FAILED {a.out}: {type(e).__name__}: {e}")
+        log("BATCH_DONE")
+        return 0
+    if not (a.ref and a.script and a.out): ap.error("--ref, --script and --out are required unless --restitch or --batch is given")
+    render(load(a.device, a.adapter or None), a, pauses)
+    return 0
+
+
+def render(model, a, pauses: dict) -> None:
+    """One script -> one finished file at a.out, with an already loaded model."""
+    import json, soundfile as sf
     torch.manual_seed(a.seed)
     import torch.nn.functional as F
     from chatterbox.tts import punc_norm, drop_invalid_tokens
@@ -543,7 +563,6 @@ def main() -> int:
     script = Path(a.script).read_text() if Path(a.script).exists() else a.script
     chunks = plan(script, a.max_chunk_s)
     log(f"{len(chunks)} chunks, predicted {sum(predicted_s(c) for c in chunks):.0f} s")
-    model = load(a.device, a.adapter or None)
     takes_dir = Path(str(Path(a.out).with_suffix("")) + ".takes"); takes_dir.mkdir(parents=True, exist_ok=True)
     ref = a.ref if a.no_clean_ref else clean_reference(a.ref, takes_dir / "ref_clean.wav")
     model.prepare_conditionals(ref, exaggeration=a.exaggeration)
@@ -603,7 +622,6 @@ def main() -> int:
             prompt = pt[:, :int(pl[0])][:, -PROMPT_TOKENS:].long().to(model.device)
     (takes_dir / "takes.json").write_text(json.dumps(meta, indent=1))
     finish(assemble(pieces, chunks, sr, a, pauses), sr, a, model.watermarker)
-    return 0
 
 
 def assemble(pieces: list, chunks: list[str], sr: int, a, pauses: dict) -> np.ndarray:

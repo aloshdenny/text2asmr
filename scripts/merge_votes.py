@@ -18,10 +18,17 @@ from fuse_labels import CHAPTER, LABELS, V7
 NAMES = {"gemini-3.1-pro": "gemini", "mimo-v2.6-flash": "mimo", "voxtral": "voxtral", "ast": "ast", "energy": "energy", "clap": "clap"}
 
 
-def chapter_vote(label: str | None, title: str) -> list[str]:
+# title classes the fetcher uses that are not menu labels but are one: keyboard typing is tapping, page turning paper
+CHAPTER_MAP = {"mouth sounds": "oral sounds", "typing": "tapping", "page turning": "paper rustling"}
+
+
+def chapter_vote(label: str | None, title: str) -> list[str] | None:
+    """The chapter's vote: its trigger, or [] ("none of the triggers") for a background chapter. A trigger outside the
+    menu (writing, hand movements) casts no vote at all -- [] would wrongly say the window holds no trigger."""
     if "spray" in title.lower(): return ["spraying"]
-    label = {"mouth sounds": "oral sounds"}.get(label, label)
-    return [label] if label in CHAPTER else []
+    label = CHAPTER_MAP.get(label, label)
+    if label in CHAPTER: return [label]
+    return [] if label == "__bg__" else None
 
 
 def main() -> int:
@@ -29,22 +36,25 @@ def main() -> int:
     ap.add_argument("--pools", type=Path, nargs="+", required=True)
     ap.add_argument("--windows", type=Path, nargs="*", default=[], help="YT window lists with chapter titles")
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--exclude", type=Path, nargs="*", default=[], help="uid lists to drop (find_broken_clips.py: votes on unreadable audio)")
     a = ap.parse_args()
     titles = {}
     for f in a.windows:
         for l in open(f, encoding="utf-8"):
             r = json.loads(l); titles.setdefault(r["uid"], r.get("chapter") or "")
+    drop = {u.strip() for f in a.exclude for u in open(f, encoding="utf-8") if u.strip()}
     out: dict = {}
     for d in a.pools:
         for f in sorted(d.glob("*.jsonl")):
             stem = f.stem
             for l in open(f, encoding="utf-8"):
                 r = json.loads(l); uid = r.get("clip") or r.get("uid")
+                if uid in drop: continue
                 if stem == "pool":
                     if r.get("label") in (None, "uniform"): continue
                     if uid.startswith("yt:"):
-                        out.setdefault("chapter", {})[uid] = {"labels": chapter_vote(r["label"], r.get("chapter") or titles.get(uid, "")),
-                                                             "menu": LABELS}
+                        vote = chapter_vote(r["label"], r.get("chapter") or titles.get(uid, ""))
+                        if vote is not None: out.setdefault("chapter", {})[uid] = {"labels": vote, "menu": LABELS}
                     else:
                         out.setdefault("pipeline", {})[uid] = {"labels": [r["label"]] if r["label"] in V7 else []}
                 elif stem in NAMES:
