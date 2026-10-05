@@ -1,10 +1,13 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(63);
+select plan(64);
 
 -- serving draws (hidden retests, controls) are random: off for the deterministic part, forced on at the end
 update private.settings set value = 0 where key in ('repeat_rate', 'control_rate_max', 'control_rate_min');
+
+-- everyone already on the board sits out too (rolled back), so the board holds only the test's people
+update public.profiles set deleted_at = now() where deleted_at is null;
 
 -- four people: a, b, c finished their profile; d signed in but did not
 insert into auth.users (id, email) values
@@ -103,6 +106,8 @@ reset role;
 
 -- contributions and export
 select is((select array_agg(username order by rank, username) from public.leaderboard() where username in ('alice', 'bob', 'kitty')), array['alice', 'bob'], 'leaderboard lists labellers');
+select is((select max(rank) - min(rank) from public.leaderboard(null, 200) where username in ('alice', 'bob')), 1::bigint,
+          'tied labellers get consecutive ranks, not a shared one');
 set local role service_role;
 set local request.jwt.claims = '{"role": "service_role"}';
 select is((select count(*) from public.admin_export_labels() where source_uid = 'pool:one'), 3::bigint, 'export carries the source uid');

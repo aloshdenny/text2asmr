@@ -50,7 +50,7 @@ class Site:
     def rpc(self, fn: str, **args):
         r = requests.post(f"{self.url}/rest/v1/rpc/{fn}", json=args, timeout=120, headers=self.h)
         if not r.ok: sys.exit(f"{fn}: {r.status_code} {r.text}")
-        return r.json()
+        return r.json() if r.content else None       # a void function answers 204 with no body
 
 
 def read_audio(path: Path) -> bytes:
@@ -92,6 +92,7 @@ def main() -> int:
     ap.add_argument("--target-votes", type=int, default=12, help="first answers a clip needs (the site takes up to max_votes, default 20)")
     ap.add_argument("--batch", required=True)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--not-core", action="store_true", help="a verification pool: served to labellers, kept out of the people ring")
     ap.add_argument("--env-file", type=Path, default=None, help="file with SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
     a = ap.parse_args()
     load_env_file(a.env_file)
@@ -153,7 +154,7 @@ def main() -> int:
             name = f"{uuid.uuid4()}.mp3"
             site.upload("clips", name, read_audio(p["path"]))
         return {"audio_path": name, "source_uid": p["uid"], "kind": p["kind"], "uncertainty": round(p["uncertainty"], 4),
-                "target_votes": a.target_votes, "batch": a.batch, "info": p["info"]}
+                "target_votes": a.target_votes, "batch": a.batch, "info": p["info"], **({"core": False} if a.not_core else {})}
 
     # upload and register a chunk at a time, so a crash never leaves audio nobody can be served
     added = 0
