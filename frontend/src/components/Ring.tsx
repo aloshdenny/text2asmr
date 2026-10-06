@@ -14,7 +14,7 @@ export default function Ring({ percent, color, label, caption }: { percent: numb
   return (
     <figure className="flex w-[140px] flex-col items-center gap-3 sm:w-60">
       <div className="relative" style={{ width: size, height: size }}>
-        <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" role="img" aria-label={`${percent.toFixed(1)}% ${label}`}>
+        <svg viewBox={`0 0 ${size} ${size}`} className="h-full w-full -rotate-90" role="img" aria-label={`${percent.toFixed(1)}% ${label}${caption ? `, ${caption}` : ''}`}>
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-hover)" strokeWidth={stroke} />
           <circle
             className="ring-arc"

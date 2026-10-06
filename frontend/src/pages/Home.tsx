@@ -16,6 +16,13 @@ const pct = (part: number, whole: number) => {
   return p > 0 && p < 0.1 ? 0.1 : Math.round(p * 10) / 10
 }
 
+/** The people ring's goal: the next milestone above what people have labelled, capped at every core clip. Measured
+ *  against all ~20k core clips the ring sat at a few percent for months; a near goal shows the same real count as
+ *  progress you can see move, and the caption says it is a milestone. */
+const MILESTONES = [250, 500, 1000, 2000, 5000, 10000]
+const milestone = (done: number, total: number) =>
+  Math.min(MILESTONES.find((m) => m > done) ?? (Math.floor(done / 10000) + 1) * 10000, total)
+
 const PROGRESS_KEY = 'asmrboard-progress'
 
 /** The last numbers this browser saw, so the rings draw on the first frame (storage can be unavailable). */
@@ -61,7 +68,9 @@ export default function Home() {
     })
   }, [])
   const n = (v?: number) => (v ?? 0).toLocaleString()
-  const human = progress ? pct(progress.foundation_human_labelled, progress.foundation_items) : 0
+  const goal = progress ? milestone(progress.foundation_human_labelled, progress.foundation_items) : 0
+  // never round up to a full ring before the milestone is actually reached (4,999 of 5,000 is 99.9%, not 100%)
+  const human = progress ? Math.min(pct(progress.foundation_human_labelled, goal), progress.foundation_human_labelled < goal ? 99.9 : 100) : 0
   const ai = progress ? pct(progress.ai_labelled_recordings, progress.corpus_recordings) : 0
   const signedIn = Boolean(session && profile?.onboarded)
   return (
@@ -91,7 +100,13 @@ export default function Home() {
             percent={human}
             color="var(--ring-green)"
             label="labelled by people"
-            caption={progress ? `${n(progress.foundation_human_labelled)} of ${n(progress.foundation_items)} core training clips` : ''}
+            caption={
+              progress
+                ? goal < progress.foundation_items
+                  ? `${n(progress.foundation_human_labelled)} of ${n(goal)} clips, the next milestone`
+                  : `${n(progress.foundation_human_labelled)} of ${n(goal)} core training clips`
+                : ''
+            }
           />
           <Ring
             percent={ai}
