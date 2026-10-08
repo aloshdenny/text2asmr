@@ -30,7 +30,8 @@ def spans(c: dict) -> list[tuple[float, float, str]]:
     out = []
     for ch in c["chapters"]:
         s = float(ch.get("start", ch.get("start_time", 0)) or 0); e = float(ch.get("end", ch.get("end_time", 0)) or 0)
-        cls = ch.get("cls") or ch.get("label") or ch.get("class")
+        # older discovery rows kept only the chapters matching the video's class and did not tag them
+        cls = ch.get("cls") or ch.get("label") or ch.get("class") or c.get("cls")
         if cls and e - s > WIN + 6: out.append((s + 3.0, e - 3.0, cls))
     return out
 
@@ -46,6 +47,8 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--sample-per-class", type=int, default=0, help="also write a random sample of this many windows per class")
     ap.add_argument("--sample-out", type=Path, default=None, help="where the sample goes (a pool.jsonl for label_pool.py)")
+    ap.add_argument("--sample-per-video", type=int, default=3, help="at most this many sampled windows from one video")
+    ap.add_argument("--sample-caps", default="", help="per-class overrides of --sample-per-class, e.g. \"writing=300,hand movements=300\"")
     a = ap.parse_args()
     done = set(a.done.read_text().split())
     rejected = {json.loads(l)["id"] for l in open(a.rejects)} if a.rejects and a.rejects.exists() else set()
@@ -76,19 +79,22 @@ def main() -> int:
     print(f"{len(rows)} windows from {vids} videos -> {a.out}")
     for cls, n in per_cls.most_common(): print(f"  {cls:22} {n}")
     if a.sample_per_class and a.sample_out:
-        # per class, at most 3 windows from one video, so the sample measures the class's titles, not one channel
+        # per class, at most --sample-per-video windows from one video, so the sample measures the class's titles,
+        # not one channel
+        caps = {k.strip(): int(v) for k, v in (x.split("=") for x in a.sample_caps.split(",") if x.strip())}
         rng, sample = random.Random(0), []
         for cls in per_cls:
             pool = [r for r in rows if r["label"] == cls]; rng.shuffle(pool)
             per_vid, picked = Counter(), []
             for r in pool:
-                if per_vid[r["rec"]] >= 3: continue
+                if per_vid[r["rec"]] >= a.sample_per_video: continue
                 per_vid[r["rec"]] += 1; picked.append(r)
-                if len(picked) >= a.sample_per_class: break
+                if len(picked) >= caps.get(cls, a.sample_per_class): break
             sample += picked
         a.sample_out.parent.mkdir(parents=True, exist_ok=True)
         a.sample_out.write_text("".join(json.dumps(r) + "\n" for r in sample), encoding="utf-8")
-        print(f"sample: {len(sample)} windows ({a.sample_per_class} per class max) -> {a.sample_out}")
+        print(f"sample: {len(sample)} windows ({a.sample_per_class} per class max) -> {a.sample_out}: "
+              + str(dict(Counter(r["label"] for r in sample))))
     return 0
 
 
