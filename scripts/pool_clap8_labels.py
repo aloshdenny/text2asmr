@@ -20,15 +20,28 @@ def safe(uid: str) -> str: return re.sub(r"[^A-Za-z0-9_.-]", "_", uid)
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pool", type=Path, required=True)
+    ap.add_argument("--pool", type=Path, default=None)
     ap.add_argument("--ckpt", type=Path, required=True)
     ap.add_argument("--thresh", type=float, default=0.5)
+    ap.add_argument("--uids", type=Path, nargs="*", default=[], help="score these clips (jsonl with uid) instead of the pool's")
+    ap.add_argument("--clips", type=Path, nargs="*", default=[], help="with --uids: pool dirs holding their audio")
+    ap.add_argument("--held-out", action="store_true",
+                    help="only clips from recordings outside v8's training split: votes on people's clips that fusion can "
+                         "use to measure CLAP's reliability without it having learned those very labels")
+    ap.add_argument("--out", type=Path, default=None, help="default <pool>/clap8.jsonl")
     a = ap.parse_args()
     import torch
     from transformers import ClapFeatureExtractor, ClapModel
-    files = {Path(f).stem: f for f in glob.glob(str(a.pool / "pool_*" / "clips" / "*.mp3"))}
-    uids = [r["uid"] for r in map(json.loads, open(a.pool / "pool.jsonl", encoding="utf-8")) if safe(r["uid"]) in files]
-    log(f"{len(uids)} clips on disk in {a.pool}")
+    from train_clap_v8 import rec_of, split_of
+    files = {}
+    for d in (a.clips if a.uids else [a.pool]):
+        for f in glob.glob(str(d / "pool_*" / "clips" / "*.mp3")): files.setdefault(Path(f).stem, f)
+    src = a.uids or [a.pool / "pool.jsonl"]
+    uids = list(dict.fromkeys(r["uid"] for f in src for r in map(json.loads, open(f, encoding="utf-8"))
+                              if r.get("uid") and safe(r["uid"]) in files))
+    if a.held_out: uids = [u for u in uids if split_of(rec_of(u)) != "train"]
+    out = a.out or a.pool / "clap8.jsonl"
+    log(f"{len(uids)} clips with audio to score -> {out}")
     dev = "cuda"
     model = ClapModel.from_pretrained(str(a.ckpt)).to(dev).eval()
     head = torch.nn.Linear(model.config.projection_dim, len(LABELS)).to(dev)
@@ -52,7 +65,7 @@ def main() -> int:
         except Exception: return u, None
 
     n = 0
-    with ThreadPoolExecutor(12) as ex, open(a.pool / "clap8.jsonl", "w", encoding="utf-8") as fh:
+    with ThreadPoolExecutor(12) as ex, open(out, "w", encoding="utf-8") as fh:
         for i in range(0, len(uids), 64):
             got = [(u, x) for u, x in ex.map(safe_load, uids[i:i + 64]) if x is not None]
             if not got: continue
@@ -60,7 +73,7 @@ def main() -> int:
                 fh.write(json.dumps({"uid": u, "labels": [c for c, v in zip(LABELS, p) if v >= a.thresh], "menu": LABELS,
                                      "probs": {c: round(float(v), 3) for c, v in zip(LABELS, p)}}) + "\n"); n += 1
             if (i // 64) % 40 == 0: log(f"  {n}/{len(uids)}")
-    log(f"CLAP8_DONE {n} clips -> {a.pool / 'clap8.jsonl'}")
+    log(f"CLAP8_DONE {n} clips -> {out}")
     return 0
 
 
