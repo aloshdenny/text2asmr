@@ -12,7 +12,7 @@ Status (2026-09-23): **transcription of both corpora is complete** (63,021 + 54,
 
 ## 1. Why an ontology model comes first
 
-The original T2A paper conditions a generator on bracket tags like `[whispering]`, `[tapping]`, `[soft]`. Auditing the released dataset (`docs/DATA_NOTES.md`) showed that **no such tags were ever released**: the model was trained on plain ASR transcripts, the binaural 48 kHz audio was downsampled to 22 kHz mono, and a quarter of the transcripts were corrupted by ASR looping on whispered speech.
+The [original T2A paper](docs/T2A_NSCTC2024.pdf) conditions a generator on bracket tags like `[whispering]`, `[tapping]`, `[soft]`. Auditing the released dataset (`docs/DATA_NOTES.md`) showed that **no such tags were ever released**: the model was trained on plain ASR transcripts, the binaural 48 kHz audio was downsampled to 22 kHz mono, and a quarter of the transcripts were corrupted by ASR looping on whispered speech.
 
 So the tags have to be reconstructed from the audio itself, at scale (the two corpora are ~118k files / >1,000 GB). A model that scores short audio windows against a fixed ontology is the only way to do that, and the same model later scores the generator's output. Everything in §2–§4 is about getting that model right.
 
@@ -152,3 +152,14 @@ scripts/discover_creators.py, acquire_stream.py                   deficit-target
 scripts/train_speech.py, train_triggers.py, train_native.py, compose_asmr.py   generator
 modal_t2a.py                    Modal deployment (transcription shards + label batch + dispatcher)
 ```
+
+---
+
+## Paper
+
+The original T2A framework (BERT text encoder, FiLM-conditioned U-Net, DDPM) is described in
+[docs/T2A_NSCTC2024.pdf](docs/T2A_NSCTC2024.pdf):
+
+> Alosh Denny, Anish S, M. Sudheep Elayidom. *T2A: A Novel Text2ASMR Framework for Generating Autonomous Sensory
+> Meridian Response Audio.* Proceedings of the National Student Conference on Trends in Computing (NSCTC 2024),
+> Edition 1, ISBN 978-81-955934-2-2. School of Engineering, Cochin University of Science and Technology.
