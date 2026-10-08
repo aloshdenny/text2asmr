@@ -15,7 +15,9 @@ from pathlib import Path
 
 from fuse_labels import CHAPTER, LABELS, V7
 
-NAMES = {"gemini-3.1-pro": "gemini", "mimo-v2.6-flash": "mimo", "voxtral": "voxtral", "ast": "ast", "energy": "energy", "clap": "clap"}
+NAMES = {"gemini-3.1-pro": "gemini", "mimo-v2.6-flash": "mimo", "voxtral": "voxtral", "ast": "ast", "energy": "energy", "clap": "clap",
+         "gemini-2.5-pro": "gemini25", "mimo-v2.6-pro": "mimopro", "gemini-3.8-flash": "gflash38", "gpt-audio": "gptaudio",
+         "clap8": "clap8"}
 
 
 # title classes the fetcher uses that are not menu labels but are one: keyboard typing is tapping, page turning paper

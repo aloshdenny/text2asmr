@@ -27,7 +27,9 @@ PROMPT = ("Listen to this short ASMR audio clip. Which of these sounds can be he
           "applies, only from this list: " + "; ".join(LABELS) + ". Answer with JSON only: {\"labels\": [...]}")
 MODELS = {"gemini-3.1-pro": ("google/gemini-3.1-pro-preview", 12), "voxtral-small-24b": ("mistralai/voxtral-small-24b-2507", 8),
           "qwen3.8-omni-flash": ("qwen/qwen3.8-omni-flash", 8), "mimo-v2.6-flash": ("xiaomi/mimo-v2.6-flash", 8),
-          "nemotron-3-nano-omni": ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", 3)}
+          "nemotron-3-nano-omni": ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", 3),
+          "gemini-2.5-pro": ("google/gemini-2.5-pro", 8), "mimo-v2.6-pro": ("xiaomi/mimo-v2.6-pro", 4),
+          "gemini-3.8-flash": ("google/gemini-3.8-flash", 8), "gpt-audio": ("openai/gpt-audio", 8)}
 
 
 def log(m): print(f"[{time.strftime('%F %T')}] {m}", flush=True)

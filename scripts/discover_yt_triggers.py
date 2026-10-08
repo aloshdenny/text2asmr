@@ -75,6 +75,8 @@ def main() -> int:
     ap.add_argument("--min-min", type=float, default=5.0)
     ap.add_argument("--max-min", type=float, default=240.0)
     ap.add_argument("--cookies", type=Path, default=None)
+    ap.add_argument("--pause", type=float, default=5.0, help="seconds between full-metadata requests")
+    ap.add_argument("--fail-streak", type=int, default=5, help="this many unavailable videos in a row = rate limited: back off")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     import yt_dlp
@@ -88,7 +90,7 @@ def main() -> int:
     base = {"quiet": True, "no_warnings": True, "ignoreerrors": True, "sleep_interval_requests": 1.0}
     if a.cookies and a.cookies.exists(): base["cookiefile"] = str(a.cookies)
     flat, full = yt_dlp.YoutubeDL({**base, "extract_flat": True}), yt_dlp.YoutubeDL({**base, "skip_download": True})
-    seen, out, why = set(have), [], Counter()
+    seen, out, why, streak = set(have), [], Counter(), [0]
     a.out.parent.mkdir(parents=True, exist_ok=True)
     fh = open(a.out, "a", encoding="utf-8")
     for cls in a.classes:
@@ -102,8 +104,16 @@ def main() -> int:
                 if not NO_TALK.search(title): why["talking title"] += 1; continue
                 if blocked_title(title): why["content filter"] += 1; continue
                 if dur and not (a.min_min * 60 <= dur <= a.max_min * 60): why["length"] += 1; continue
+                time.sleep(a.pause)
                 info = full.extract_info(f"https://www.youtube.com/watch?v={e['id']}", download=False)
-                if not info: why["unavailable"] += 1; continue
+                if not info:
+                    # YouTube answers a rate-limited session with "unavailable" for every video: a run of them means
+                    # back off (an hour, as its message says), not that the videos are gone
+                    why["unavailable"] += 1; streak[0] += 1; seen.discard(e["id"])
+                    if streak[0] >= a.fail_streak:
+                        log(f"{streak[0]} unavailable in a row: rate limited, backing off 60 min"); time.sleep(3600); streak[0] = 0
+                    continue
+                streak[0] = 0
                 dur = float(info.get("duration") or 0)
                 row = {"id": info["id"], "url": f"https://www.youtube.com/watch?v={info['id']}", "title": title,
                        "channel": info.get("channel") or info.get("uploader"), "channel_id": info.get("channel_id"),
