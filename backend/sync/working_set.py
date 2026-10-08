@@ -8,6 +8,8 @@
             research server's copy to the same object name, until the storage budget is used.
   fill      new low-confidence / weak-label clips from a manifest ({uid, path, kind, uncertainty, info}, as
             push_clips.py --manifest reads), in file order, until the budget is used.
+  make-room take down the least-needed clips nobody has heard yet from one batch (--room-batch), until --make-room
+            MB are free: room for a better-ranked batch. Reversible like any takedown (reload brings them back).
 
   python working_set.py --env-file D:/t2a/asmrboard.env --clips D:/t2a/pool D:/t2a/pool_yt ... \\
       --takedown --reload --fill D:/t2a/pool_ytdense_all/site_manifest.jsonl --fill-batch 2026-10-04-ytdense --not-core \\
@@ -70,6 +72,8 @@ def main() -> int:
     ap.add_argument("--not-core", action="store_true", help="fill clips form a verification pool (outside the people ring)")
     ap.add_argument("--target-votes", type=int, default=12)
     ap.add_argument("--budget-mb", type=float, default=900.0, help="stop reloading / filling at this much stored audio")
+    ap.add_argument("--make-room", type=float, default=0.0, help="MB to free by taking down unheard clips of --room-batch")
+    ap.add_argument("--room-batch", default=None, help="batch whose least-needed unheard clips make room")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     load_env_file(a.env_file)
@@ -88,6 +92,24 @@ def main() -> int:
         print(f"takedown: {sum(why.values())} clips {why}" + (" (first page only: dry run)" if a.dry_run else ""))
         used = site.rpc("admin_storage_bytes")
         print(f"  storage now {used / MB:.0f} MB")
+
+    if a.make_room and a.room_batch:
+        goal, freed, taken = a.make_room * MB, 0, 0
+        while freed < goal:
+            q = {"select": "id,audio_path", "active": "is.true", "votes": "eq.0", "batch": f"eq.{a.room_batch}",
+                 "order": "need.asc", "limit": "500"}
+            rows = requests.get(f"{site.url}/rest/v1/clips", params=q, headers=site.h, timeout=120).json()
+            if not rows: break
+            ids = ",".join(r["id"] for r in rows)        # never pull audio from under someone listening right now
+            busy = {r["clip_id"] for r in requests.get(f"{site.url}/rest/v1/assignments", headers=site.h, timeout=120,
+                    params={"select": "clip_id", "state": "eq.open", "clip_id": f"in.({ids})"}).json()}
+            rows = [r for r in rows if r["id"] not in busy]
+            if not rows: break
+            if a.dry_run: print(f"make-room: would take down {len(rows)}+ clips of {a.room_batch}, least needed first"); break
+            site.rpc("admin_set_active", p_clips=[r["id"] for r in rows], p_active=False)
+            delete_objects(site, [r["audio_path"] for r in rows])
+            now = site.rpc("admin_storage_bytes"); freed += used - now; used = now; taken += len(rows)
+        print(f"make-room: {taken} unheard {a.room_batch} clips taken down, {freed / MB:.0f} MB freed; storage now {used / MB:.0f} MB")
 
     room = a.budget_mb * MB - used
     files = local_files(a.clips) if (a.reload or a.fill) else {}
