@@ -5,7 +5,7 @@
   python pool_clap8_labels.py --pool D:/t2a/pool_ytdense2 --ckpt D:/t2a/clap_v82/best
 """
 from __future__ import annotations
-import argparse, glob, json, re, sys
+import argparse, glob, json, os, re, sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -65,7 +65,7 @@ def main() -> int:
         except Exception: return u, None
 
     n = 0
-    with ThreadPoolExecutor(12) as ex, open(out, "w", encoding="utf-8") as fh:
+    with ThreadPoolExecutor(os.cpu_count() or 12) as ex, open(out, "w", encoding="utf-8") as fh:
         for i in range(0, len(uids), 64):
             got = [(u, x) for u, x in ex.map(safe_load, uids[i:i + 64]) if x is not None]
             if not got: continue

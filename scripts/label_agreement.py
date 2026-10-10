@@ -12,7 +12,7 @@ Scoring (per model, against the human): any-overlap rate, exact-set rate, mean J
 (model says X -> human heard X) and recall (human heard X -> model says X).
 """
 from __future__ import annotations
-import argparse, base64, json, os, re, threading, time, urllib.request
+import argparse, base64, json, os, re, threading, time, urllib.error, urllib.request
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -59,21 +59,16 @@ def ask_google(model: str, mp3: bytes) -> tuple[list[str], str, float]:
                                  data=json.dumps(body).encode(),
                                  headers={"x-goog-api-key": os.environ.get("GOOGLE_API_KEY") or os.environ["GEMINI_API_KEY"],
                                           "Content-Type": "application/json"})
-    err = ""
-    for i in range(6):
-        try:
-            r = json.loads(urllib.request.urlopen(req, timeout=300).read())
-            txt = "".join(p.get("text", "") for p in ((r.get("candidates") or [{}])[0].get("content") or {}).get("parts", [])
-                          if not p.get("thought"))
-            u = r.get("usageMetadata") or {}
-            pin, pout = GOOGLE_PRICES.get(name, (2.0, 12.0))
-            cost = (u.get("promptTokenCount", 0) * pin + (u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0)) * pout) / 1e6
-            m = re.search(r"\{.*\}", txt, re.S)
-            return norm_labels(json.loads(m.group(0)).get("labels") if m else []), txt[-300:], cost
-        except Exception as e:
-            err = f"{type(e).__name__}: {str(e)[:120]}"
-            time.sleep(min(60, 5 * 2 ** i))
-    return [], f"ERROR {err}", 0.0
+
+    def go():
+        r = json.loads(urllib.request.urlopen(req, timeout=300).read())
+        txt = "".join(p.get("text", "") for p in ((r.get("candidates") or [{}])[0].get("content") or {}).get("parts", [])
+                      if not p.get("thought"))
+        u = r.get("usageMetadata") or {}
+        pin, pout = GOOGLE_PRICES.get(name, (2.0, 12.0))
+        cost = (u.get("promptTokenCount", 0) * pin + (u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0)) * pout) / 1e6
+        return _parse(txt), txt[-300:], cost
+    return _retry(go, "google")
 
 
 # USD per million tokens, estimates where the provider does not return a cost: (text in, audio/image in, out)
@@ -90,10 +85,43 @@ def _parse(txt: str) -> list[str]:
     except Exception: return []
 
 
-def _retry(fn) -> tuple[list[str], str, float]:
+# Requests per minute per provider, shared by every thread in the process (override with T2A_RPM_<PROVIDER>).
+# Labelling is bound by these limits, not by CPU: more workers than the limit only buys 429s. OpenAI's tier reports
+# its own limit in x-ratelimit-limit-requests (400/min on the current key); Gemini's free/low tiers cap requests per day.
+RPM_DEFAULT = {"openai": 350, "google": 60, "anthropic": 50, "xai": 60}
+_PACE, _DEAD, _PLOCK = {}, {}, threading.Lock()
+
+
+def _pace(provider: str) -> None:
+    """Space requests to the provider's per-minute limit: each caller takes the next free slot, then sleeps until it."""
+    gap = 60.0 / float(os.environ.get(f"T2A_RPM_{provider.upper()}", RPM_DEFAULT.get(provider, 60)))
+    with _PLOCK:
+        now = time.time(); slot = max(now, _PACE.get(provider, 0.0)); _PACE[provider] = slot + gap
+    if slot > now: time.sleep(slot - now)
+
+
+def _retry(fn, provider: str) -> tuple[list[str], str, float]:
+    """Call fn at the provider's pace. A rate-limit 429 waits (Retry-After when given) and retries; an exhausted quota
+    or credit balance marks the provider dead for the rest of the run, so every later clip fails fast as ERROR QUOTA
+    (label_pool retries ERROR rows on its next run) instead of spending six backoffs each."""
+    if provider in _DEAD: return [], f"ERROR QUOTA {_DEAD[provider]}", 0.0
     err = ""
     for i in range(6):
+        _pace(provider)
         try: return fn()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")[:800]
+            if e.code == 429 and any(k in body for k in ("insufficient_quota", "credit_balance", "PerDay", "per_day")):
+                with _PLOCK:
+                    if provider not in _DEAD:
+                        _DEAD[provider] = re.sub(r"\s+", " ", body)[:140]
+                        log(f"{provider}: quota/credit exhausted -- skipping it for the rest of this run ({_DEAD[provider][:90]})")
+                return [], f"ERROR QUOTA {_DEAD[provider]}", 0.0
+            flat = re.sub(r"\s+", " ", body)
+            err = f"HTTP {e.code}: {flat[:140]}"
+            ra = (e.headers or {}).get("retry-after")
+            try: time.sleep(min(120.0, float(ra)))
+            except (TypeError, ValueError): time.sleep(min(60, 5 * 2 ** i))
         except Exception as e:
             err = f"{type(e).__name__}: {str(e)[:160]}"
             time.sleep(min(60, 5 * 2 ** i))
@@ -116,7 +144,7 @@ def ask_openai(model: str, mp3: bytes) -> tuple[list[str], str, float]:
         audio = d.get("audio_tokens", 0)
         cost = ((u.get("prompt_tokens", 0) - audio) * tin + audio * ain + u.get("completion_tokens", 0) * out) / 1e6
         return _parse(txt), txt[-300:], cost
-    return _retry(go)
+    return _retry(go, "openai")
 
 
 def spectro_png(mp3: bytes) -> bytes:
@@ -153,7 +181,7 @@ def ask_claude_spectro(model: str, mp3: bytes) -> tuple[list[str], str, float]:
         if r.stop_reason == "refusal": return [], f"REFUSED {getattr(r.stop_details, 'category', '')}", 0.0
         cost = (r.usage.input_tokens * 4.0 + r.usage.output_tokens * 20.0) / 1e6
         return _parse(txt), txt[-300:], cost
-    return _retry(go)
+    return _retry(go, "anthropic")
 
 
 def ask_xai_spectro(model: str, mp3: bytes) -> tuple[list[str], str, float]:
@@ -172,7 +200,7 @@ def ask_xai_spectro(model: str, mp3: bytes) -> tuple[list[str], str, float]:
         u = r.get("usage") or {}
         cost = (u.get("prompt_tokens", 0) * 3.0 + u.get("completion_tokens", 0) * 15.0) / 1e6   # estimate
         return _parse(txt), txt[-300:], cost
-    return _retry(go)
+    return _retry(go, "xai")
 
 
 def ask(model: str, mp3: bytes, key: str) -> tuple[list[str], str, float]:

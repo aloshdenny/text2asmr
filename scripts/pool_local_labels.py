@@ -69,8 +69,12 @@ def main() -> int:
         from score_pool_clap import Scorer, repeatpad
         scorer = Scorer(a.clap, dev=dev); classes = scorer.classes + ["__bg__"]
     out = {k: open(a.pool / f"{k}.jsonl", "w", encoding="utf-8") for k in (["ast", "energy"] + (["clap"] if scorer else []))}
+    from concurrent.futures import ThreadPoolExecutor
+    import os
+    pool = ThreadPoolExecutor(os.cpu_count() or 8)        # decoding is the CPU-bound part: use every core, the GPU waits less
     for i in range(0, len(items), a.batch):
-        b = [(it, w) for it in items[i:i + a.batch] if (w := try_load(it[1], 16000)) is not None]
+        chunk = items[i:i + a.batch]
+        b = [(it, w) for it, w in zip(chunk, pool.map(lambda it: try_load(it[1], 16000), chunk)) if w is not None]
         if not b: continue
         b, wavs = [it for it, _ in b], [w for _, w in b]
         with torch.no_grad():
@@ -83,7 +87,7 @@ def main() -> int:
             out["energy"].write(json.dumps({"uid": uid, "labels": ["silence / room tone"] if np.percentile(db, 90) < -50 else [],
                                             "p90_db": round(float(np.percentile(db, 90)), 1)}) + "\n")
         if scorer:
-            w48 = np.stack([repeatpad(load(f, 48000)) for _, f in b])
+            w48 = np.stack(list(pool.map(lambda it: repeatpad(load(it[1], 48000)), b)))
             for (uid, _), pc in zip(b, scorer(w48)):
                 top = classes[int(pc.argmax())]
                 out["clap"].write(json.dumps({"uid": uid, "labels": [] if top == "__bg__" else [top], "p": round(float(pc.max()), 3)}) + "\n")
