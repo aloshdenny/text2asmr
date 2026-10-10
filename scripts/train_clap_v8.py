@@ -110,9 +110,9 @@ def build_rows(a) -> dict[str, list[dict]]:
         if sp != "train": held.add(rec_of(uid))
         rows[f"human_{sp}"].append({"uid": uid, "path": f, "y": y, "m": m, "w": a.human_weight, "n_people": len(people)})
     full = np.ones(len(LABELS), np.float32)
-    for l in open(a.trigger_manifest, encoding="utf-8"):
+    for l in (l for f in a.trigger_manifest for l in open(f, encoding="utf-8")):
         r = json.loads(l)
-        if (r.get("info") or {}).get("tier") != 3 or r["uid"] not in fused or rec_of(r["uid"]) in held: continue
+        if (r.get("info") or {}).get("tier") != 3 or r["uid"] not in fused or rec_of(r["uid"]) in held or r["uid"] in drop: continue
         rows["trigger"].append({"uid": r["uid"], "path": r["path"], "y": np.array([fused[r["uid"]][c] for c in LABELS], np.float32),
                                 "m": full, "w": 1.0})
     trig = {x["uid"] for x in rows["trigger"]}
@@ -133,7 +133,10 @@ def main() -> int:
     ap.add_argument("--fused", type=Path, required=True)
     ap.add_argument("--humans", type=Path, nargs="+", required=True)
     ap.add_argument("--clips", type=Path, nargs="+", required=True, help="pool dirs: clips under pool_*/clips")
-    ap.add_argument("--trigger-manifest", type=Path, required=True)
+    ap.add_argument("--trigger-manifest", type=Path, nargs="+", required=True,
+                    help="manifests whose tier-3 rows (two signals agree on the sound) become trigger rows")
+    ap.add_argument("--eval-only", action="store_true",
+                    help="score --init (a v8 dir with head.pt) on today's val/test people and the external clips; no training")
     ap.add_argument("--external", type=Path, default=None, help="human-labelled trigger clips (clips.json) for the final check")
     ap.add_argument("--exclude", type=Path, nargs="*", default=[], help="uid lists never to train or evaluate on (content_filter.py)")
     ap.add_argument("--out", type=Path, required=True)
@@ -207,7 +210,8 @@ def main() -> int:
                 except Exception: continue
             if not keep: continue
             q.put((torch.from_numpy(np.stack(xs)).pin_memory(), keep))
-    for i in range(a.workers): threading.Thread(target=feeder, args=(a.seed * 100 + i,), daemon=True).start()
+    if not a.eval_only:
+        for i in range(a.workers): threading.Thread(target=feeder, args=(a.seed * 100 + i,), daemon=True).start()
 
     @torch.no_grad()
     def predict(rs: list[dict]) -> np.ndarray:
@@ -243,6 +247,23 @@ def main() -> int:
         if not a.freeze_tower: model.save_pretrained(d); proc.save_pretrained(d)
         torch.save(head.state_dict(), d / "head.pt")
         json.dump({"labels": LABELS, "init": str(a.init), "frozen_tower": a.freeze_tower}, open(d / "v8_meta.json", "w"))
+
+    def external():
+        if not (a.external and a.external.exists()): return
+        ext = [c for c in json.loads(a.external.read_text()) if EXT_MAP.get(c["label"], c["label"]) in LABELS]
+        P = predict([{"path": c["wav"]} for c in ext]); tix = [LABELS.index(t) for t in TRIGGERS]
+        hit, top, cnt = defaultdict(int), defaultdict(int), defaultdict(int)
+        for c, p in zip(ext, P):
+            t = EXT_MAP.get(c["label"], c["label"]); cnt[t] += 1; hit[t] += p[LABELS.index(t)] >= 0.5
+            top[t] += TRIGGERS[int(np.argmax(p[tix]))] == t
+        log("EXTERNAL " + " ".join(f"{t}: P>.5 {100 * hit[t] / cnt[t]:.0f}% top {100 * top[t] / cnt[t]:.0f}%" for t in cnt)
+            + f" | overall top-trigger {100 * sum(top.values()) / max(1, sum(cnt.values())):.0f}%")
+
+    if a.eval_only:          # the same yardstick for an existing checkpoint: today's held-out people, the external clips
+        head.load_state_dict(torch.load(a.init / "head.pt", map_location=dev))
+        evaluate(0, "val"); evaluate(0, "test"); external()
+        log("EVAL_ONLY_DONE")
+        return 0
 
     best, step, t0, run, n = -1.0, 0, time.time(), 0.0, 0
     rng = random.Random(a.seed)
@@ -281,15 +302,7 @@ def main() -> int:
     if not a.freeze_tower: model = ClapModel.from_pretrained(str(d)).to(dev)
     head.load_state_dict(torch.load(d / "head.pt", map_location=dev))
     evaluate(step, "test")
-    if a.external and a.external.exists():
-        ext = [c for c in json.loads(a.external.read_text()) if EXT_MAP.get(c["label"], c["label"]) in LABELS]
-        P = predict([{"path": c["wav"]} for c in ext]); tix = [LABELS.index(t) for t in TRIGGERS]
-        hit, top, cnt = defaultdict(int), defaultdict(int), defaultdict(int)
-        for c, p in zip(ext, P):
-            t = EXT_MAP.get(c["label"], c["label"]); cnt[t] += 1; hit[t] += p[LABELS.index(t)] >= 0.5
-            top[t] += TRIGGERS[int(np.argmax(p[tix]))] == t
-        log("EXTERNAL " + " ".join(f"{t}: P>.5 {100 * hit[t] / cnt[t]:.0f}% top {100 * top[t] / cnt[t]:.0f}%" for t in cnt)
-            + f" | overall top-trigger {100 * sum(top.values()) / max(1, sum(cnt.values())):.0f}%")
+    external()
     log("TRAIN_DONE")
     return 0
 
