@@ -43,7 +43,39 @@ def norm_labels(xs) -> list[str]:
     return out
 
 
+# USD per million tokens (input, output incl. thinking) for Gemini called on Google's API directly
+GOOGLE_PRICES = {"gemini-3.1-pro-preview": (2.0, 12.0), "gemini-2.5-pro": (1.25, 10.0), "gemini-3.8-flash": (0.75, 4.5)}
+
+
+def ask_google(model: str, mp3: bytes) -> tuple[list[str], str, float]:
+    """The same question on Google's Gemini API with the project's GEMINI_API_KEY, for when the OpenRouter key cannot
+    spend (OpenRouter only ever passed Gemini through to a Google key; Google bills either way)."""
+    name = model.split("/", 1)[1]
+    body = {"contents": [{"role": "user", "parts": [{"text": PROMPT},
+                                                    {"inline_data": {"mime_type": "audio/mp3", "data": base64.b64encode(mp3).decode()}}]}],
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 8000}}
+    req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{name}:generateContent",
+                                 data=json.dumps(body).encode(),
+                                 headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"], "Content-Type": "application/json"})
+    err = ""
+    for i in range(6):
+        try:
+            r = json.loads(urllib.request.urlopen(req, timeout=300).read())
+            txt = "".join(p.get("text", "") for p in ((r.get("candidates") or [{}])[0].get("content") or {}).get("parts", [])
+                          if not p.get("thought"))
+            u = r.get("usageMetadata") or {}
+            pin, pout = GOOGLE_PRICES.get(name, (2.0, 12.0))
+            cost = (u.get("promptTokenCount", 0) * pin + (u.get("candidatesTokenCount", 0) + u.get("thoughtsTokenCount", 0)) * pout) / 1e6
+            m = re.search(r"\{.*\}", txt, re.S)
+            return norm_labels(json.loads(m.group(0)).get("labels") if m else []), txt[-300:], cost
+        except Exception as e:
+            err = f"{type(e).__name__}: {str(e)[:120]}"
+            time.sleep(min(60, 5 * 2 ** i))
+    return [], f"ERROR {err}", 0.0
+
+
 def ask(model: str, mp3: bytes, key: str) -> tuple[list[str], str, float]:
+    if model.startswith("google/") and os.environ.get("T2A_GEMINI_DIRECT") == "1": return ask_google(model, mp3)
     body = {"model": model, "temperature": 0, "max_tokens": 4000, "usage": {"include": True},
             "messages": [{"role": "user", "content": [{"type": "text", "text": PROMPT},
                          {"type": "input_audio", "input_audio": {"data": base64.b64encode(mp3).decode(), "format": "mp3"}}]}]}

@@ -44,15 +44,15 @@ OVERRIDES = {"microphone touching": {"scratching", "tapping", "brushing"}, "crin
              "page turning": {"paper rustling"}}
 NO_TALK = re.compile(r"no[\s-]*talk|no[\s-]*speaking|without talking", re.I)
 QUERY_TERMS = {
-    "spraying": ["spray bottle", "spraying", "spray sounds", "hair spray", "mist spray"],
-    "paper rustling": ["paper sounds", "paper crumpling", "newspaper", "paper rustling", "cardboard"],
-    "page turning": ["page turning", "book sounds", "flipping pages", "page flipping"],
+    "spraying": ["spray bottle", "spraying", "spray sounds", "hair spray", "mist spray", "water spray", "spritzing", "hairspray", "aerosol can", "spray mist sounds"],
+    "paper rustling": ["paper sounds", "paper crumpling", "newspaper", "paper rustling", "cardboard", "tissue paper", "crumpling paper", "envelope sounds", "paper tearing", "cardboard sounds"],
+    "page turning": ["page turning", "book sounds", "flipping pages", "page flipping", "book page turning", "old book sounds", "flipping through book", "magazine page turning"],
     "crinkling": ["crinkle", "crinkling", "plastic crinkles", "bubble wrap", "plastic wrap"],
     "tapping": ["tapping", "fast tapping", "nail tapping", "wood tapping", "glass tapping"],
-    "brushing": ["brushing", "mic brushing", "brush sounds", "makeup brushes", "fluffy brushes"],
-    "cutting": ["cutting", "scissors", "cutting sounds", "soap cutting", "chopping"],
-    "liquid": ["water sounds", "liquid sounds", "pouring water", "water bottle"],
-    "sticky": ["sticky", "tape sounds", "sticky fingers", "slime", "sticky tape"],
+    "brushing": ["brushing", "mic brushing", "brush sounds", "makeup brushes", "fluffy brushes", "brushing the camera", "fluffy brush", "hair brushing", "paint brush sounds"],
+    "cutting": ["cutting", "scissors", "cutting sounds", "soap cutting", "chopping", "kinetic sand cutting", "soap carving", "foam cutting", "scissors cutting paper", "cutting vegetables"],
+    "liquid": ["water sounds", "liquid sounds", "pouring water", "water bottle", "water drops", "liquid pouring", "drinking water sounds", "water bubbles", "water gel"],
+    "sticky": ["sticky", "tape sounds", "sticky fingers", "slime", "sticky tape", "duct tape", "sticky hands", "honey sounds", "tape peeling", "velcro"],
 }
 
 
