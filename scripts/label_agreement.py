@@ -29,7 +29,8 @@ MODELS = {"gemini-3.1-pro": ("google/gemini-3.1-pro-preview", 12), "voxtral-smal
           "qwen3.8-omni-flash": ("qwen/qwen3.8-omni-flash", 8), "mimo-v2.6-flash": ("xiaomi/mimo-v2.6-flash", 8),
           "nemotron-3-nano-omni": ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", 3),
           "gemini-2.5-pro": ("google/gemini-2.5-pro", 8), "mimo-v2.6-pro": ("xiaomi/mimo-v2.6-pro", 4),
-          "gemini-3.8-flash": ("google/gemini-3.8-flash", 8), "gpt-audio": ("openai/gpt-audio", 8)}
+          "gemini-3.8-flash": ("google/gemini-3.8-flash", 8), "gpt-audio": ("openai/gpt-audio", 8),
+          "gpt-audio-1.5": ("openai/gpt-audio-1.5", 8)}
 
 
 def log(m): print(f"[{time.strftime('%F %T')}] {m}", flush=True)
@@ -48,15 +49,16 @@ GOOGLE_PRICES = {"gemini-3.1-pro-preview": (2.0, 12.0), "gemini-2.5-pro": (1.25,
 
 
 def ask_google(model: str, mp3: bytes) -> tuple[list[str], str, float]:
-    """The same question on Google's Gemini API with the project's GEMINI_API_KEY, for when the OpenRouter key cannot
-    spend (OpenRouter only ever passed Gemini through to a Google key; Google bills either way)."""
+    """The same question on Google's Gemini API (GOOGLE_API_KEY, else GEMINI_API_KEY), for when the OpenRouter key
+    cannot spend (OpenRouter only ever passed Gemini through to a Google key; Google bills either way)."""
     name = model.split("/", 1)[1]
     body = {"contents": [{"role": "user", "parts": [{"text": PROMPT},
                                                     {"inline_data": {"mime_type": "audio/mp3", "data": base64.b64encode(mp3).decode()}}]}],
             "generationConfig": {"temperature": 0, "maxOutputTokens": 8000}}
     req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{name}:generateContent",
                                  data=json.dumps(body).encode(),
-                                 headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"], "Content-Type": "application/json"})
+                                 headers={"x-goog-api-key": os.environ.get("GOOGLE_API_KEY") or os.environ["GEMINI_API_KEY"],
+                                          "Content-Type": "application/json"})
     err = ""
     for i in range(6):
         try:
@@ -74,7 +76,111 @@ def ask_google(model: str, mp3: bytes) -> tuple[list[str], str, float]:
     return [], f"ERROR {err}", 0.0
 
 
+# USD per million tokens, estimates where the provider does not return a cost: (text in, audio/image in, out)
+OPENAI_PRICES = {"gpt-audio": (2.5, 32.0, 10.0), "gpt-audio-1.5": (2.5, 32.0, 10.0), "gpt-audio-mini": (0.6, 10.0, 2.4)}
+SPECTRO_PROMPT = ("This image is a log-mel spectrogram of a 6-second ASMR audio clip: time runs left to right (0-6 s), "
+                  "frequency bottom to top (Hz on the axis), brighter means louder. Judging from the spectrogram, which of "
+                  "these sounds can be heard in the clip? Choose every label that applies, only from this list: "
+                  + "; ".join(LABELS) + ". Answer with JSON only: {\"labels\": [...]}")
+
+
+def _parse(txt: str) -> list[str]:
+    m = re.search(r"\{.*\}", txt or "", re.S)
+    try: return norm_labels(json.loads(m.group(0)).get("labels") if m else [])
+    except Exception: return []
+
+
+def _retry(fn) -> tuple[list[str], str, float]:
+    err = ""
+    for i in range(6):
+        try: return fn()
+        except Exception as e:
+            err = f"{type(e).__name__}: {str(e)[:160]}"
+            time.sleep(min(60, 5 * 2 ** i))
+    return [], f"ERROR {err}", 0.0
+
+
+def ask_openai(model: str, mp3: bytes) -> tuple[list[str], str, float]:
+    """OpenAI's audio models on OpenAI's own API (OPENAI_API_KEY): the clip as input_audio, text answer only."""
+    name = model.split("/", 1)[1]
+    body = {"model": name, "modalities": ["text"], "messages": [{"role": "user", "content": [
+        {"type": "text", "text": PROMPT}, {"type": "input_audio", "input_audio": {"data": base64.b64encode(mp3).decode(), "format": "mp3"}}]}]}
+    req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Authorization": "Bearer " + os.environ["OPENAI_API_KEY"], "Content-Type": "application/json"})
+
+    def go():
+        r = json.loads(urllib.request.urlopen(req, timeout=300).read())
+        txt = r["choices"][0]["message"].get("content") or ""
+        u = r.get("usage") or {}; d = u.get("prompt_tokens_details") or {}
+        tin, ain, out = OPENAI_PRICES.get(name, (2.5, 32.0, 10.0))
+        audio = d.get("audio_tokens", 0)
+        cost = ((u.get("prompt_tokens", 0) - audio) * tin + audio * ain + u.get("completion_tokens", 0) * out) / 1e6
+        return _parse(txt), txt[-300:], cost
+    return _retry(go)
+
+
+def spectro_png(mp3: bytes) -> bytes:
+    """A labelled log-mel spectrogram of the clip, for judges that see images but cannot hear (Claude, Grok)."""
+    import io, subprocess
+    import numpy as np, librosa, matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", "-", "-f", "f32le", "-ac", "1", "-ar", "24000", "-"],
+                         input=mp3, capture_output=True, check=True).stdout
+    y = np.frombuffer(pcm, np.float32)
+    S = librosa.power_to_db(librosa.feature.melspectrogram(y=y, sr=24000, n_fft=1024, hop_length=240, n_mels=128), ref=np.max)
+    fig, ax = plt.subplots(figsize=(8, 4), dpi=100)
+    librosa.display.specshow(S, sr=24000, hop_length=240, x_axis="time", y_axis="mel", ax=ax, cmap="magma", vmin=-80, vmax=0)
+    ax.set_xlabel("time (s)"); ax.set_ylabel("Hz"); fig.tight_layout()
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig)
+    return buf.getvalue()
+
+
+def ask_claude_spectro(model: str, mp3: bytes) -> tuple[list[str], str, float]:
+    """Claude on the Anthropic API (ANTHROPIC_API_KEY) with the clip's spectrogram as an image: Claude cannot take audio."""
+    import anthropic
+    import librosa.display  # noqa: F401  (specshow)
+    name = model.split("/", 1)[1]
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=4)
+    img = base64.standard_b64encode(spectro_png(mp3)).decode()
+
+    def go():
+        r = client.beta.messages.create(
+            model=name, max_tokens=4000, betas=["server-side-fallback-2026-06-01"], fallbacks=[{"model": "claude-opus-4-8"}],
+            messages=[{"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img}},
+                                                   {"type": "text", "text": SPECTRO_PROMPT}]}])
+        txt = "".join(b.text for b in r.content if b.type == "text")
+        if r.stop_reason == "refusal": return [], f"REFUSED {getattr(r.stop_details, 'category', '')}", 0.0
+        cost = (r.usage.input_tokens * 4.0 + r.usage.output_tokens * 20.0) / 1e6
+        return _parse(txt), txt[-300:], cost
+    return _retry(go)
+
+
+def ask_xai_spectro(model: str, mp3: bytes) -> tuple[list[str], str, float]:
+    """Grok on xAI's API (XAI_API_KEY) with the clip's spectrogram as an image: no Grok model takes audio."""
+    import librosa.display  # noqa: F401
+    name = model.split("/", 1)[1]
+    url = "data:image/png;base64," + base64.b64encode(spectro_png(mp3)).decode()
+    body = {"model": name, "temperature": 0, "messages": [{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": url}}, {"type": "text", "text": SPECTRO_PROMPT}]}]}
+    req = urllib.request.Request("https://api.x.ai/v1/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Authorization": "Bearer " + os.environ["XAI_API_KEY"], "Content-Type": "application/json"})
+
+    def go():
+        r = json.loads(urllib.request.urlopen(req, timeout=300).read())
+        txt = r["choices"][0]["message"].get("content") or ""
+        u = r.get("usage") or {}
+        cost = (u.get("prompt_tokens", 0) * 3.0 + u.get("completion_tokens", 0) * 15.0) / 1e6   # estimate
+        return _parse(txt), txt[-300:], cost
+    return _retry(go)
+
+
 def ask(model: str, mp3: bytes, key: str) -> tuple[list[str], str, float]:
+    """Route a judge: spectro:anthropic/... and spectro:xai/... see a spectrogram; openai/... and google/... go to the
+    provider's own API when T2A_OPENAI_DIRECT / T2A_GEMINI_DIRECT is 1; everything else through OpenRouter."""
+    if model.startswith("spectro:anthropic/"): return ask_claude_spectro(model.split(":", 1)[1], mp3)
+    if model.startswith("spectro:xai/"): return ask_xai_spectro(model.split(":", 1)[1], mp3)
+    if model.startswith("openai/") and os.environ.get("T2A_OPENAI_DIRECT") == "1": return ask_openai(model, mp3)
     if model.startswith("google/") and os.environ.get("T2A_GEMINI_DIRECT") == "1": return ask_google(model, mp3)
     body = {"model": model, "temperature": 0, "max_tokens": 4000, "usage": {"include": True},
             "messages": [{"role": "user", "content": [{"type": "text", "text": PROMPT},
