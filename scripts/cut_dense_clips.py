@@ -71,7 +71,9 @@ def main() -> int:
                                 "-ac", "1", "-ar", "24000", "-b:a", "48k", str(dst)], capture_output=True, timeout=180)
             if p.returncode == 0 and dst.exists() and dst.stat().st_size > 8000: n += 1
             else: dst.unlink(missing_ok=True)
-        local.unlink(missing_ok=True)
+        for i in range(5):                      # Windows: ffmpeg or a scanner can still hold the file for a moment
+            try: local.unlink(missing_ok=True); break
+            except PermissionError: time.sleep(2 * (i + 1))
         return n
 
     done, t0 = 0, time.time()
