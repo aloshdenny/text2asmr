@@ -29,6 +29,8 @@ CLASS_MAP = {
     "liquid":       ["Liquid", "Pour", "Trickle_and_dribble", "Drip", "Splash_and_splatter", "Fill_(with_liquid)"],
     "page turning": ["Writing"],
     "other sound":  ["Zipper_(clothing)", "Squeak", "Typing"],
+    "cutting":      ["Scissors"],
+    "sticky":       ["Packing_tape_and_duct_tape"],
 }
 CAPTIONS = {
     "tapping": ["tapping sounds", "fingers tapping on a surface", "light taps close to the microphone"],
@@ -37,6 +39,8 @@ CAPTIONS = {
     "liquid": ["liquid sounds", "water pouring and trickling", "wet liquid sounds close to the mic"],
     "page turning": ["pages turning", "paper being handled", "writing and paper sounds"],
     "other sound": ["a miscellaneous close-mic sound", "an object handled near the microphone"],
+    "cutting": ["cutting sounds", "scissors cutting close to the microphone", "snipping and cutting"],
+    "sticky": ["sticky tape sounds", "tape being pulled and stuck", "sticky peeling close to the mic"],
 }
 
 
@@ -49,6 +53,8 @@ def main() -> int:
     ap.add_argument("--per-class", type=int, default=3000)
     ap.add_argument("--batch", type=int, default=32, help="clips per Hub commit")
     ap.add_argument("--only", default="", help="comma-separated subset of classes")
+    ap.add_argument("--splits", default="dev", help="FSD50K splits to draw from; eval is the external test set "
+                    "(build_external_eval_set.py), so it never becomes training data")
     a = ap.parse_args()
     a.work.mkdir(parents=True, exist_ok=True)
     from huggingface_hub import HfApi, hf_hub_download, CommitOperationAdd
@@ -60,7 +66,7 @@ def main() -> int:
 
     have = {f for f in api.list_repo_files(DST, repo_type="dataset")}
     label_of = {}
-    for split in ("dev", "eval"):
+    for split in [x.strip() for x in a.splits.split(",") if x.strip()]:
         p = hf_hub_download(SRC, f"labels/{split}.csv", repo_type="dataset", cache_dir=str(a.work / "cache"))
         for r in csv.DictReader(open(p)):
             label_of[(split, r["fname"])] = {l.strip() for l in r["labels"].split(",")}
@@ -75,6 +81,9 @@ def main() -> int:
     log("available: " + ", ".join(f"{c}={len(v)}" for c, v in sorted(picks.items())))
 
     manifest = a.work / "manifest.jsonl"
+    if not manifest.exists() and "manifest.jsonl" in have:   # extend the repo's manifest, never replace it
+        import shutil
+        shutil.copy(hf_hub_download(DST, "manifest.jsonl", repo_type="dataset", cache_dir=str(a.work / "cache")), manifest)
     done = set()
     if manifest.exists():
         for line in manifest.open():
