@@ -54,7 +54,9 @@ def main() -> int:
                 if uid in drop: continue
                 if stem == "pool":
                     if r.get("label") in (None, "uniform"): continue
-                    if uid.startswith("yt:"):
+                    # YouTube windows carry their chapter / title class, Freesound clips their search term: a weak
+                    # vote of the same kind, not the corpus pipeline's label
+                    if uid.startswith(("yt:", "fs:")):
                         vote = chapter_vote(r["label"], r.get("chapter") or titles.get(uid, ""))
                         if vote is not None: out.setdefault("chapter", {})[uid] = {"labels": vote, "menu": LABELS}
                     else:
