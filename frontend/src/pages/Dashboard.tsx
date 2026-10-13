@@ -47,7 +47,9 @@ export default function Dashboard() {
         }
         actions={
           <>
-            <ButtonLink to={`/u/${profile.username}`} variant="ghost">Public profile</ButtonLink>
+            {profile.guest
+              ? <ButtonLink to="/save-progress" variant="ghost">Save progress</ButtonLink>
+              : <ButtonLink to={`/u/${profile.username}`} variant="ghost">Public profile</ButtonLink>}
             <ButtonLink to="/label" variant="primary">Start labelling</ButtonLink>
           </>
         }

@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import AvatarPicker from '../components/AvatarPicker'
 import { AuthLayout } from '../components/Layouts'
-import { Alert, Button, Field, Input, Loading } from '../components/ui'
+import { Alert, Button, Field, Input, Loading, PasswordInput } from '../components/ui'
 import { useAuth, type Profile } from '../lib/auth'
 import { useUserStats } from '../lib/stats'
 import { friendlyError, supabase } from '../lib/supabase'
@@ -10,12 +10,15 @@ import { friendlyError, supabase } from '../lib/supabase'
 const USERNAME = /^[a-z0-9_]{3,20}$/
 
 /** Onboarding, once per account: username, optional picture, 18+ confirmation. A kit labeller who just signed up
- *  already has a profile (claimed by email) -- they see their labels and can change the username they were given. */
+ *  already has a profile (claimed by email) -- they see their labels and can change the username they were given.
+ *  A guest who has confirmed an email (Save progress) lands here too: same account and labels, now with a username
+ *  and a password; saving clears the guest flag (database trigger) and puts them on the leaderboard. */
 export default function Welcome() {
   const { session, profile, loading } = useAuth()
   if (loading) return <AuthLayout><Loading /></AuthLayout>
   if (!session) return <Navigate to="/signup" replace />
-  if (profile?.onboarded) return <Navigate to="/dashboard" replace />
+  if (session.user.is_anonymous) return <Navigate to={profile ? '/label' : '/start'} replace />
+  if (profile?.onboarded && !profile.guest) return <Navigate to="/dashboard" replace />
   return <WelcomeForm key={profile?.id ?? 'new'} uid={session.user.id} profile={profile} />
 }
 
@@ -23,10 +26,12 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
   const { refreshProfile } = useAuth()
   const navigate = useNavigate()
   const { stats } = useUserStats(profile?.username)
-  const [username, setUsername] = useState(profile?.username ?? '')
+  const linking = !!profile?.guest                      // a guest finishing their account: keep labels, pick a name
+  const [username, setUsername] = useState(linking ? '' : profile?.username ?? '')
+  const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState(profile?.display_name ?? '')
   const [avatar, setAvatar] = useState<string | null>(profile?.avatar_url ?? null)
-  const [adult, setAdult] = useState(false)
+  const [adult, setAdult] = useState(linking)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -36,7 +41,16 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
     const u = username.trim().toLowerCase()
     if (!USERNAME.test(u)) return setError('Usernames are 3 to 20 characters: lowercase letters, digits and _.')
     if (!adult) return setError('You need to be 18 or older to label these clips.')
+    if (linking && password.length < 8) return setError('Use at least 8 characters for your password.')
     setBusy(true)
+    if (linking) {
+      const { error } = await supabase.auth.updateUser({ password })
+      if (error) {
+        setBusy(false)
+        return setError(friendlyError(error.message))
+      }
+      await supabase.auth.refreshSession()                // the token still says anonymous until it is refreshed
+    }
     const fields = { username: u, display_name: displayName.trim() || null, avatar_url: avatar }
     const { error } = profile
       ? await supabase.from('profiles').update({ ...fields, onboarded: true }).eq('id', uid)
@@ -51,9 +65,11 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
     <AuthLayout>
       <form onSubmit={save} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
         <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">{profile ? 'Welcome back' : 'Set up your profile'}</h1>
+          <h1 className="text-xl font-semibold text-ink">{linking ? 'Finish your account' : profile ? 'Welcome back' : 'Set up your profile'}</h1>
           <p className="text-sm text-ink-muted">
-            {profile
+            {linking
+              ? `${stats?.labelled ? `Your ${stats.labelled.toLocaleString()} labelled clips are on this account. ` : ''}Pick a username and a password to join the leaderboard.`
+              : profile
               ? stats
                 ? `Your ${stats.labelled.toLocaleString()} labelled clips from the Ear Check kits are on this account. Keep your username or pick a new one.`
                 : 'Your labels from the Ear Check kits are on this account.'
@@ -63,6 +79,11 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
         <Field label="Username" htmlFor="username" hint="3 to 20 characters: lowercase letters, digits and _.">
           <Input id="username" required maxLength={20} autoCapitalize="none" spellCheck={false} value={username} placeholder="quiet_ears" onChange={(e) => setUsername(e.target.value.toLowerCase())} />
         </Field>
+        {linking && (
+          <Field label="Password" htmlFor="password" hint="At least 8 characters.">
+            <PasswordInput id="password" required minLength={8} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+        )}
         <Field label={<>Display name <span className="font-normal text-ink-muted">(optional)</span></>} htmlFor="display">
           <Input id="display" maxLength={40} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>

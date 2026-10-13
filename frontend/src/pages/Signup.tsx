@@ -14,6 +14,7 @@ export default function Signup() {
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+  if (!loading && session?.user.is_anonymous) return <Navigate to="/save-progress" replace />
   if (!loading && session) return <Navigate to="/welcome" replace />
 
   const submit = async (e: FormEvent) => {

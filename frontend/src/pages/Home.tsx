@@ -88,10 +88,13 @@ export default function Home() {
               <ButtonLink to="/label" variant="primary" size="lg">Start labelling</ButtonLink>
             </>
           ) : (
-            <ButtonLink to="/signup" variant="primary" size="lg">Create an account</ButtonLink>
+            <>
+              <ButtonLink to="/start" variant="primary" size="lg">Start labelling</ButtonLink>
+              <ButtonLink to="/signup" variant="secondary" size="lg">Create an account</ButtonLink>
+            </>
           )}
         </div>
-        <p className="mt-4 text-xs text-ink-muted">18+ only. Some clips contain intimate vocal sounds.</p>
+        <p className="mt-4 text-xs text-ink-muted">{signedIn ? '' : 'No sign-up needed. '}18+ only. Some clips contain intimate vocal sounds.</p>
       </section>
 
       <Card className="mt-10 py-8">

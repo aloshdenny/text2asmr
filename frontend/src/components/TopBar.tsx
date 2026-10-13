@@ -52,21 +52,30 @@ function AccountMenu() {
         className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
       >
         <Avatar name={profile.username} url={profile.avatar_url} size={26} />
-        <span className="hidden text-[13px] font-medium text-ink sm:inline">{profile.username}</span>
+        <span className="hidden text-[13px] font-medium text-ink sm:inline">{profile.guest ? 'Guest' : profile.username}</span>
         <Icon className="h-3.5 w-3.5 text-ink-muted"><path d="m6 9 6 6 6-6" /></Icon>
       </button>
       {open && (
         <div role="menu" className="absolute right-0 top-full z-20 mt-1.5 w-52 rounded-xl border border-hairline bg-surface-raised p-1 shadow-[0_10px_30px_-12px_rgb(0_0_0/0.25)]">
-          <div className="px-2.5 pb-1.5 pt-1 text-xs text-ink-muted">Signed in as <span className="font-medium text-ink">@{profile.username}</span></div>
+          <div className="px-2.5 pb-1.5 pt-1 text-xs text-ink-muted">
+            {profile.guest ? 'Labelling as a guest' : <>Signed in as <span className="font-medium text-ink">@{profile.username}</span></>}
+          </div>
+          {profile.guest && (
+            <Link role="menuitem" to="/save-progress" className={item}>
+              <Icon><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></Icon>Save progress
+            </Link>
+          )}
           <Link role="menuitem" to="/dashboard" className={item}>
             <Icon><path d="M3 13h4v7H3zM10 8h4v12h-4zM17 4h4v16h-4z" /></Icon>Dashboard
           </Link>
           <Link role="menuitem" to="/label" className={item}>
             <Icon><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></Icon>Label clips
           </Link>
-          <Link role="menuitem" to="/settings" className={item}>
-            <Icon><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>Edit profile
-          </Link>
+          {!profile.guest && (
+            <Link role="menuitem" to="/settings" className={item}>
+              <Icon><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>Edit profile
+            </Link>
+          )}
           <div className="my-1 h-px bg-hairline" />
           <button
             role="menuitem"
@@ -76,7 +85,7 @@ function AccountMenu() {
               await supabase.auth.signOut()
             }}
           >
-            <Icon><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5M21 12H9" /></Icon>Sign out
+            <Icon><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5M21 12H9" /></Icon>{profile.guest ? 'Leave guest session' : 'Sign out'}
           </button>
         </div>
       )}
@@ -93,7 +102,10 @@ export default function TopBar() {
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
           {loading ? null : session && profile ? (
-            <AccountMenu />
+            <>
+              {profile.guest && <ButtonLink to="/save-progress" size="sm" variant="ghost" className="max-sm:hidden">Save progress</ButtonLink>}
+              <AccountMenu />
+            </>
           ) : session ? (
             <ButtonLink to="/welcome" size="sm" variant="primary">Finish signing up</ButtonLink>
           ) : (

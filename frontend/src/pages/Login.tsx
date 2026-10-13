@@ -13,7 +13,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const [unclaimed, setUnclaimed] = useState(false)
   const [busy, setBusy] = useState(false)
-  if (!loading && session) return <Navigate to="/dashboard" replace />
+  if (!loading && session && !session.user.is_anonymous) return <Navigate to="/dashboard" replace />
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
