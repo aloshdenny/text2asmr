@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(5);
+select plan(11);
 
 update private.settings set value = 0 where key in ('repeat_rate', 'control_rate_max', 'control_rate_min');
 update public.clips set active = false;
@@ -54,6 +54,43 @@ set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000f2", "role": "authenticated"}';
 select is((select audio_path from public.next_clip()), 's-hot.mp3', 'a clip at quorum gives way to the neediest fresh one');
 reset role;
+
+-- thin classes first: queued with a thin title class, a clip carries a boost
+set local role service_role;
+set local request.jwt.claims = '{"role": "service_role"}';
+select public.admin_add_clips('[
+  {"audio_path": "s-thin.mp3", "source_uid": "pool:s-thin", "kind": "unsure", "uncertainty": 0.2, "target_votes": 12,
+   "info": {"title_class": "spraying"}},
+  {"audio_path": "s-thin2.mp3", "source_uid": "pool:s-thin2", "kind": "unsure", "uncertainty": 0.2, "target_votes": 12,
+   "info": {"title_class": "page turning"}}
+]'::jsonb);
+reset role;
+select ok((select boost > 0 from public.clips where audio_path = 's-thin.mp3'), 'a spraying clip is boosted');
+select ok((select boost > 0 from public.clips where audio_path = 's-thin2.mp3'), 'page turning counts as paper rustling');
+
+-- an ordinary started clip (s-dull, 1 judge) and a needier ordinary fresh one (s-hot) both give way to a thin clip
+delete from public.assignments where user_id = '00000000-0000-0000-0000-0000000000f2';
+update public.clips set target_votes = 12, votes = 1 where audio_path = 's-dull.mp3';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000f2", "role": "authenticated"}';
+select ok((select audio_path from public.next_clip()) in ('s-thin.mp3', 's-thin2.mp3'), 'a thin-class clip comes before ordinary ones');
+reset role;
+
+-- among thin clips, one already started is topped up before a fresh one is opened
+delete from public.assignments where user_id = '00000000-0000-0000-0000-0000000000f2';
+update public.clips set votes = 1 where audio_path = 's-thin2.mp3';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000f2", "role": "authenticated"}';
+select is((select audio_path from public.next_clip()), 's-thin2.mp3', 'a started thin clip is topped up first');
+reset role;
+
+-- taking a class off the list and recomputing removes its boost
+delete from private.thin_classes where label = 'spraying';
+set local role service_role;
+set local request.jwt.claims = '{"role": "service_role"}';
+select ok(public.admin_refresh_boost() >= 1, 'boosts are recomputed');
+reset role;
+select is((select boost from public.clips where audio_path = 's-thin.mp3'), 0::real, 'and spraying is no longer boosted');
 
 select * from finish();
 rollback;
