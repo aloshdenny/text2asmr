@@ -1,4 +1,4 @@
-// The home page's ring numbers, cached on Vercel's CDN: dataset_progress() serves a once-a-day snapshot, so nearly
+// The home page's ring numbers, cached on Vercel's CDN: dataset_progress() serves an hourly snapshot, so nearly
 // every visitor gets this from the edge without touching the database. Only the four counts and the snapshot time
 // leave here; the key is added server-side, as in api/sb.ts.
 export const config = { runtime: 'edge' }
@@ -17,9 +17,9 @@ export default async function handler(): Promise<Response> {
   if (!res.ok) return new Response('unavailable', { status: 502, headers: { 'cache-control': 'no-store' } })
   const [row] = (await res.json()) as Record<string, unknown>[]
   if (!row) return new Response('unavailable', { status: 502, headers: { 'cache-control': 'no-store' } })
-  const { foundation_items, foundation_human_labelled, corpus_recordings, ai_labelled_recordings, computed_at } = row
+  const { foundation_items, foundation_human_labelled, corpus_recordings, ai_labelled_recordings, human_labels, computed_at } = row
   return Response.json(
-    { foundation_items, foundation_human_labelled, corpus_recordings, ai_labelled_recordings, computed_at },
+    { foundation_items, foundation_human_labelled, corpus_recordings, ai_labelled_recordings, human_labels, computed_at },
     {
       headers: {
         'cache-control': 'public, max-age=300', // browsers: 5 minutes

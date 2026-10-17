@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(12);
 
 create temp table before as select * from public.dataset_progress();
 grant select on before to anon, authenticated, service_role;
@@ -11,6 +11,8 @@ set local request.jwt.claims = '{"role": "anon"}';
 select is((select count(*) from public.dataset_progress()), 1::bigint, 'anyone can read the ring numbers');
 select ok((select computed_at > now() - interval '26 hours' from public.dataset_progress()), 'from a snapshot under a day old');
 select throws_ok('select * from private.progress_snapshot', '42501', null, 'the snapshot table itself is private');
+select is((select human_labels from public.dataset_progress()), (select human_labels from before),
+          'the people ring also carries every answer people gave');
 select throws_ok('select public.admin_refresh_progress()', '42501', null, 'visitors cannot force a recount');
 reset role;
 
@@ -22,6 +24,10 @@ select is((select foundation_items from public.dataset_progress()), (select foun
 -- ... which the pipeline can ask for
 select lives_ok('select public.admin_refresh_progress()', 'the service role can recount');
 reset role;
+select is((select human_labels from private.progress_snapshot),
+          (select count(*) from public.labels where not unsure)
+          + (select count(*) from public.imported_labels i join public.profiles p on p.id = i.user_id where not p.synthetic),
+          'human_labels counts site labels and kit labels, not seed placeholders');
 -- and a snapshot older than a day is recounted on the next read
 update private.progress_snapshot set computed_at = now() - interval '2 days', foundation_items = 0;
 select is((select foundation_items from public.dataset_progress()), (select foundation_items + 1 from before), 'a stale snapshot is recounted');

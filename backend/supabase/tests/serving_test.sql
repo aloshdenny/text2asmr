@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(4);
+select plan(5);
 
 update private.settings set value = 0 where key in ('repeat_rate', 'control_rate_max', 'control_rate_min');
 update public.clips set active = false;
@@ -37,6 +37,15 @@ select lives_ok($$select * from public.submit_label((select id from ids where au
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000f2", "role": "authenticated"}';
 select is((select audio_path from public.next_clip()), 's-dull.mp3', 'a started clip is finished before a fresh one is opened');
 reset role;
+
+-- breadth first: a started clip with `breadth_votes` (3) judges gives way to a fresh one, though it wants 12
+delete from public.assignments where user_id = '00000000-0000-0000-0000-0000000000f2';
+update public.clips set votes = 3 where audio_path = 's-dull.mp3';
+set local role authenticated;
+set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000f2", "role": "authenticated"}';
+select is((select audio_path from public.next_clip()), 's-hot.mp3', 'a clip with three judges gives way to the neediest fresh one');
+reset role;
+update public.clips set votes = 1 where audio_path = 's-dull.mp3';
 
 -- once a clip has its quorum it is no longer preferred
 delete from public.assignments where user_id = '00000000-0000-0000-0000-0000000000f2';

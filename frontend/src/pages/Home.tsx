@@ -8,7 +8,10 @@ import { useAuth } from '../lib/auth'
 import { useLeaderboard } from '../lib/stats'
 import { supabase } from '../lib/supabase'
 
-type Progress = { foundation_items: number; foundation_human_labelled: number; corpus_recordings: number; ai_labelled_recordings: number }
+type Progress = {
+  foundation_items: number; foundation_human_labelled: number; corpus_recordings: number; ai_labelled_recordings: number
+  human_labels?: number // every answer people gave (absent in numbers cached before 2026-10-17)
+}
 
 /** Percent to one decimal place; anything above zero but under 0.1 shows as 0.1%. */
 const pct = (part: number, whole: number) => {
@@ -16,12 +19,11 @@ const pct = (part: number, whole: number) => {
   return p > 0 && p < 0.1 ? 0.1 : Math.round(p * 10) / 10
 }
 
-/** The people ring's goal: the next milestone above what people have labelled, capped at every core clip. Measured
- *  against all ~20k core clips the ring sat at a few percent for months; a near goal shows the same real count as
- *  progress you can see move, and the caption says it is a milestone. */
+/** The people ring counts labels -- every answer people have given -- toward the next milestone. Counting clips with at
+ *  least one label stood still whenever people were adding judges to clips already started (742 for a week of new
+ *  labels); every answer moves this one. The caption says it is a milestone. */
 const MILESTONES = [250, 500, 1000, 2000, 5000, 10000]
-const milestone = (done: number, total: number) =>
-  Math.min(MILESTONES.find((m) => m > done) ?? (Math.floor(done / 10000) + 1) * 10000, total)
+const milestone = (done: number) => MILESTONES.find((m) => m > done) ?? (Math.floor(done / 10000) + 1) * 10000
 
 const PROGRESS_KEY = 'asmrboard-progress'
 
@@ -68,9 +70,10 @@ export default function Home() {
     })
   }, [])
   const n = (v?: number) => (v ?? 0).toLocaleString()
-  const goal = progress ? milestone(progress.foundation_human_labelled, progress.foundation_items) : 0
+  const answers = progress ? progress.human_labels ?? progress.foundation_human_labelled : 0
+  const goal = milestone(answers)
   // never round up to a full ring before the milestone is actually reached (4,999 of 5,000 is 99.9%, not 100%)
-  const human = progress ? Math.min(pct(progress.foundation_human_labelled, goal), progress.foundation_human_labelled < goal ? 99.9 : 100) : 0
+  const human = progress ? Math.min(pct(answers, goal), answers < goal ? 99.9 : 100) : 0
   const ai = progress ? pct(progress.ai_labelled_recordings, progress.corpus_recordings) : 0
   const signedIn = Boolean(session && profile?.onboarded)
   return (
@@ -103,13 +106,7 @@ export default function Home() {
             percent={human}
             color="var(--ring-green)"
             label="labelled by people"
-            caption={
-              progress
-                ? goal < progress.foundation_items
-                  ? `${n(progress.foundation_human_labelled)} of ${n(goal)} clips, the next milestone`
-                  : `${n(progress.foundation_human_labelled)} of ${n(goal)} core training clips`
-                : ''
-            }
+            caption={progress ? `${n(answers)} of ${n(goal)} labels, the next milestone` : ''}
           />
           <Ring
             percent={ai}
