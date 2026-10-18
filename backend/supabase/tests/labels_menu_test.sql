@@ -1,7 +1,7 @@
 -- supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(14);
 
 -- the menu, as anyone sees it
 set local role anon;
@@ -39,6 +39,22 @@ select is((select total from public.submit_label((select clip_id from public.nex
 select is((select labels from public.labels where user_id = '00000000-0000-0000-0000-0000000000e1'),
           array['clapping', 'moaning', 'sex slapping', 'squirting'], 'and stored by key');
 reset role;
+
+-- clips whose titles promise a new sound are served before the older thin classes
+set local role service_role;
+set local request.jwt.claims = '{"role": "service_role"}';
+select is(public.admin_add_clips('[
+  {"audio_path": "b1.mp3", "source_uid": "pool:boost-new", "kind": "unlabelled", "priority": 0.5, "info": {"title_tags": ["squirting", "spanking"]}},
+  {"audio_path": "b2.mp3", "source_uid": "pool:boost-old", "kind": "unsure", "priority": 0.5, "info": {"unsure": ["brushing"]}},
+  {"audio_path": "b3.mp3", "source_uid": "pool:boost-none", "kind": "unsure", "priority": 0.5, "info": {"unsure": ["whispering"]}}
+]'::jsonb), 3, 'three clips queued');
+select is(public.admin_tag_clips('[{"source_uid": "pool:boost-old", "title_tags": ["growling"]}]'::jsonb), 1, 'title tags can be added to a queued clip');
+reset role;
+select results_eq($$select s.source_uid, c.boost from public.clips c join private.clip_sources s on s.clip_id = c.id
+                    where s.source_uid like 'pool:boost-%' order by s.source_uid$$,
+                  $$values ('pool:boost-new', 0.5::real), ('pool:boost-none', 0::real), ('pool:boost-old', 0.5::real)$$,
+                  'a new-label title tag boosts 0.5, a thin unsure class 0.3, anything else 0');
+select is(private.thin_boost('{"unsure": ["brushing"]}'::jsonb), 0.3::real, 'the older thin classes keep 0.3');
 
 select * from finish();
 rollback;

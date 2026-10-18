@@ -21,6 +21,11 @@ from pathlib import Path
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from content_filter import blocked_title          # noqa: E402  the title screen, applied here too in case a blocklist is stale
+from title_tags import TAGS, title_tags           # noqa: E402
+
 
 def load_env_file(path: Path | None) -> None:
     """KEY=value lines (e.g. ~/.t2a/asmrboard.env) into the environment, so keys never sit on a command line."""
@@ -80,6 +85,10 @@ def main() -> int:
     ap.add_argument("--humans", type=Path, nargs="*", default=[], help="people's label files: their clips become controls")
     ap.add_argument("--unlabelled", type=Path, default=None, help="jsonl of uids nobody labelled yet (probe_fused.py mine.jsonl)")
     ap.add_argument("--manifest", type=Path, default=None, help="jsonl {uid, path, kind?}: queue exactly these")
+    ap.add_argument("--tagged", type=Path, nargs="*", default=[],
+                    help="pool.jsonl files: queue windows from recordings whose titles promise a newly added sound (title_tags.py)")
+    ap.add_argument("--n-tagged", type=int, default=300, help="windows per tagged sound")
+    ap.add_argument("--per-recording", type=int, default=3, help="at most this many windows from one recording per sound")
     ap.add_argument("--n-unsure", type=int, default=1000)
     ap.add_argument("--n-unlabelled", type=int, default=0)
     ap.add_argument("--control-frac", type=float, default=0.1)
@@ -134,12 +143,34 @@ def main() -> int:
                 pp = float(m.get("probe_p", 0.5))
                 picks.append({"uid": m["uid"], "path": audio[sanitize(m["uid"])], "kind": "unlabelled", "uncertainty": max(0.5, 1 - abs(2 * pp - 1)),
                               "info": {k: v for k, v in m.items() if k in ("target", "probe_p", "label")}})
+        if a.tagged:
+            # windows from recordings that promise a new sound, spread across recordings; people decide what is in them
+            seen = {p["uid"] for p in picks}
+            pool = sorted({json.loads(l)["uid"] for f in a.tagged for l in open(f, encoding="utf-8")})
+            rng.shuffle(pool)
+            per_tag, per_rec = {t: 0 for t in TAGS}, {}
+            for u in pool:
+                tags = title_tags(u)
+                if not tags or u in seen or not have(u): continue
+                rec = re.sub(r"_\d+$", "", u)
+                want = [t for t in tags if per_tag[t] < a.n_tagged and per_rec.get((rec, t), 0) < a.per_recording]
+                if not want: continue
+                for t in want:
+                    per_tag[t] += 1; per_rec[(rec, t)] = per_rec.get((rec, t), 0) + 1
+                picks.append({"uid": u, "path": audio[sanitize(u)], "kind": "unlabelled", "uncertainty": 0.9, "info": {}})
+                seen.add(u)
+            print("tagged windows per sound:", per_tag)
         if not a.all:
             ctrl = [u for u in people if have(u) and u in F]
             rng.shuffle(ctrl)
             for u in ctrl[: int(len(picks) * a.control_frac)]:
                 picks.append({"uid": u, "path": audio[sanitize(u)], "kind": "control", "uncertainty": unsure_of(F[u]),
                               "info": {"people": people[u]}})
+    n = len(picks)
+    picks = [p for p in picks if not blocked_title(p["uid"])]
+    if len(picks) < n: print(f"left out {n - len(picks)} clips whose recording titles the content filter blocks")
+    for p in picks:                                           # the sounds the title promises: they decide what people hear first
+        if tags := title_tags(p["uid"]): p["info"] = {**p["info"], "title_tags": tags}
     kinds = {k: sum(p["kind"] == k for p in picks) for k in ("unsure", "confident", "unlabelled", "control")}
     print(f"{len(picks)} clips: {kinds}")
     if a.dry_run or not picks: return 0

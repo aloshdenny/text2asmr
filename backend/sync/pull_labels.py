@@ -21,12 +21,18 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--min-labels", type=int, default=20, help="leave out listeners with fewer labels (too few to learn a reliability)")
+    ap.add_argument("--keep-weak", action="store_true",
+                    help="keep labellers the site rates weak (answers that do not follow the audio, or two warning signs)")
     ap.add_argument("--env-file", type=Path, default=None)
     a = ap.parse_args()
     load_env_file(a.env_file)
     site = Site()
     # first answers only: hidden retests measure a labeller's consistency (trust), they are not a second vote
     rows = [r for r in site.rpc("admin_export_labels") if r.get("attempt", 1) == 1]
+    weak = {r["labeller"] for r in rows if r.get("quality") == "weak"}
+    if weak and not a.keep_weak:
+        rows = [r for r in rows if r["labeller"] not in weak]
+        print(f"left out {len(weak)} labellers rated weak (--keep-weak keeps them)")
     # the labels each answer was offered: the menu grows (clapping and the NSFW group joined 2026-10-18), and an answer
     # given before a label existed abstains on it instead of counting as a "no"
     options = sorted(site_menu(site), key=lambda o: o["sort"])
@@ -40,7 +46,8 @@ def main() -> int:
             fh.write(json.dumps({"who": r["labeller"], "username": r["username"], "uid": r["source_uid"], "labels": r["labels"],
                                  "skipped": r["unsure"] and not r["labels"], "unsure": r["unsure"],
                                  "other": r["other_text"], "menu": menu_at(r["created_at"]), "kind": r["kind"],
-                                 "listen_ms": r["listen_ms"], "trust": r.get("trust"), "at": r["created_at"]}) + "\n")
+                                 "listen_ms": r["listen_ms"], "trust": r.get("trust"), "quality": r.get("quality"),
+                                 "at": r["created_at"]}) + "\n")
     print(f"{len(rows)} labels from {len(n)} listeners; wrote {len(keep)} from {sum(v >= a.min_labels for v in n.values())} "
           f"listeners with >= {a.min_labels} labels -> {a.out}")
     return 0

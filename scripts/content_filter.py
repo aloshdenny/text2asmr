@@ -5,7 +5,8 @@ the crowd queue (sync/push_clips.py --exclude; sync clips already queued are blo
 read the uid list this writes.
 
 Titles are the only screen here: ~49k recordings have hash file names and need their metadata screened separately.
-Broad words that are usually innocent in these titles ("brother", "student", "young", "son") are not on the list.
+Broad words that are usually innocent in these titles ("brother" on its own, "bro", "family", "student", "young", "son")
+are not on the list; "big / little brother" and the sibling and extended-family words are.
 
   python content_filter.py --corpora aoxo/t2a-mommy aoxo/t2a-daddy --pools D:/t2a/pool* --out D:/t2a/fused/blocked
 Out: <out>_recordings.txt (corpus file paths) and <out>_uids.txt (every pool uid from those recordings)
@@ -16,12 +17,17 @@ from pathlib import Path
 
 BLOCK = re.compile(r"daughter|step[- ]?(dad|mom|mum|daughter|son|sis|bro|father|mother)|teen|school|classroom"
                    r"|(?<![a-z])(ddlg|cgl|mdlb|ddlb|abdl)(?![a-z])|little (one|girl|boy)|age[- ]?play|ageplay|babysit"
-                   r"|(?<![a-z])(child|kid|kids|minor|underage|loli)(?![a-z])")
+                   r"|(?<![a-z])(child|kid|kids|minor|underage|loli)(?![a-z])"
+                   # 2026-10-18: titles saying incest outright, and sibling / extended-family roleplay, were getting through
+                   r"|incest|mom ?son|(?<![a-z])(sister|sisters|sis|sibling|siblings|cousin|cousins|aunt|auntie|uncle|niece|nephew)(?![a-z])"
+                   r"|(little|big|baby|older|younger|step) ?brother")
 
 
 def blocked_title(path: str) -> bool:
     """True when a recording's file name (its title) names a blocked theme."""
-    return bool(BLOCK.search(path.split("/")[-1].lower().replace("_", " ")))
+    # titles separate words with hyphens, underscores or dots ("Little-Girl"): read them as spaces, or the multi-word
+    # terms ("little girl", "big brother") never match (they did not before 2026-10-18)
+    return bool(BLOCK.search(re.sub(r"[-_.]+", " ", path.split("/")[-1].lower())))
 
 
 def rec_of(uid: str) -> str:
