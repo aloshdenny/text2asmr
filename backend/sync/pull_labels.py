@@ -27,7 +27,11 @@ def main() -> int:
     site = Site()
     # first answers only: hidden retests measure a labeller's consistency (trust), they are not a second vote
     rows = [r for r in site.rpc("admin_export_labels") if r.get("attempt", 1) == 1]
-    menu = [o["key"] for o in sorted(site_menu(site), key=lambda o: o["sort"])]
+    # the labels each answer was offered: the menu grows (clapping and the NSFW group joined 2026-10-18), and an answer
+    # given before a label existed abstains on it instead of counting as a "no"
+    options = sorted(site_menu(site), key=lambda o: o["sort"])
+    def menu_at(at: str) -> list[str]:
+        return [o["key"] for o in options if o.get("added_at", "") <= at]
     n = Counter(r["labeller"] for r in rows)
     keep = [r for r in rows if n[r["labeller"]] >= a.min_labels]
     a.out.parent.mkdir(parents=True, exist_ok=True)
@@ -35,7 +39,7 @@ def main() -> int:
         for r in keep:
             fh.write(json.dumps({"who": r["labeller"], "username": r["username"], "uid": r["source_uid"], "labels": r["labels"],
                                  "skipped": r["unsure"] and not r["labels"], "unsure": r["unsure"],
-                                 "other": r["other_text"], "menu": menu, "kind": r["kind"],
+                                 "other": r["other_text"], "menu": menu_at(r["created_at"]), "kind": r["kind"],
                                  "listen_ms": r["listen_ms"], "trust": r.get("trust"), "at": r["created_at"]}) + "\n")
     print(f"{len(rows)} labels from {len(n)} listeners; wrote {len(keep)} from {sum(v >= a.min_labels for v in n.values())} "
           f"listeners with >= {a.min_labels} labels -> {a.out}")
@@ -44,7 +48,7 @@ def main() -> int:
 
 def site_menu(site: Site) -> list[dict]:
     import requests
-    r = requests.get(f"{site.url}/rest/v1/label_options?select=key,sort", headers=site.h, timeout=30)
+    r = requests.get(f"{site.url}/rest/v1/label_options?select=key,sort,added_at", headers=site.h, timeout=30)
     r.raise_for_status()
     return r.json()
 

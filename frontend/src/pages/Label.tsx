@@ -180,7 +180,7 @@ export default function Label() {
     return () => window.removeEventListener('keydown', f)
   }, [])
 
-  const groups = (['Voice', 'Triggers', 'Other'] as const).map((g) => [g, menu.filter((o) => o.grp === g)] as const)
+  const groups = (['Voice', 'Triggers', 'NSFW', 'Other'] as const).map((g) => [g, menu.filter((o) => o.grp === g)] as const)
   const keyOf = (o: Option) => KEYS[menu.indexOf(o)] ?? ''
   const pct = time.dur ? Math.min(100, (time.at / time.dur) * 100) : 0
 
@@ -295,7 +295,7 @@ export default function Label() {
                           )}
                         >
                           <Kbd className={cx('max-sm:hidden', on && 'border-brand-border bg-transparent text-brand')}>{keyOf(o)}</Kbd>
-                          {o.key}
+                          {o.title ?? o.key}
                         </button>
                       )
                     })}
@@ -314,7 +314,7 @@ export default function Label() {
               />
             )}
             <p className="mt-4 min-h-5 border-t border-hairline pt-3 text-xs text-ink-muted">
-              {hint ? <><span className="font-medium text-ink">{hint.key}:</span> {hint.hint}</> : 'Hover a label to see what it covers.'}
+              {hint ? <><span className="font-medium text-ink">{hint.title ?? hint.key}:</span> {hint.hint}</> : 'Hover a label to see what it covers.'}
             </p>
           </Card>
 
@@ -329,7 +329,7 @@ export default function Label() {
             </Button>
           </div>
           <p className="mt-4 hidden text-xs text-ink-muted sm:block">
-            <Kbd>1</Kbd> to <Kbd>0</Kbd> and <Kbd>A</Kbd> to <Kbd>J</Kbd> toggle labels · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>U</Kbd> can’t tell · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
+            <Kbd>1</Kbd> to <Kbd>0</Kbd> and the letters on each label toggle it · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>U</Kbd> can’t tell · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
           </p>
         </>
       )}
