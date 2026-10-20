@@ -19,6 +19,8 @@ TAGS = {
     "growling": r"growl",
     "grunting": r"grunt|groan",
     "bed creaking": r"creak|squeak|bed sound",
+    "laughing": r"laugh|giggl|chuckl",            # 2026-10-20, from labellers' free text
+    "gasping": r"gasp",
 }
 _TAGS = {k: re.compile(p) for k, p in TAGS.items()}
 

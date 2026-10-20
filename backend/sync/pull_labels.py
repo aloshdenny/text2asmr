@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from push_clips import Site, load_env_file
+from free_text import labels_in
 
 
 def main() -> int:
@@ -43,9 +44,14 @@ def main() -> int:
     a.out.parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as fh:
         for r in keep:
+            # free text that names a menu label counts as that label ("Giggling" -> laughing), even from before it existed
+            menu = menu_at(r["created_at"])
+            named = labels_in(r["other_text"], set(o["key"] for o in options))
+            r["labels"] = sorted(set(r["labels"]) | set(named))
+            menu = menu + [k for k in named if k not in menu]
             fh.write(json.dumps({"who": r["labeller"], "username": r["username"], "uid": r["source_uid"], "labels": r["labels"],
                                  "skipped": r["unsure"] and not r["labels"], "unsure": r["unsure"],
-                                 "other": r["other_text"], "menu": menu_at(r["created_at"]), "kind": r["kind"],
+                                 "other": r["other_text"], "menu": menu, "kind": r["kind"],
                                  "listen_ms": r["listen_ms"], "trust": r.get("trust"), "quality": r.get("quality"),
                                  "at": r["created_at"]}) + "\n")
     print(f"{len(rows)} labels from {len(n)} listeners; wrote {len(keep)} from {sum(v >= a.min_labels for v in n.values())} "
