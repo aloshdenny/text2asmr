@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from content_filter import blocked_title          # noqa: E402  the title screen, applied here too in case a blocklist is stale
 from title_tags import TAGS, title_tags           # noqa: E402
+from voices import voice_of                       # noqa: E402
 
 
 def load_env_file(path: Path | None) -> None:
@@ -171,6 +172,7 @@ def main() -> int:
     if len(picks) < n: print(f"left out {n - len(picks)} clips whose recording titles the content filter blocks")
     for p in picks:                                           # the sounds the title promises: they decide what people hear first
         if tags := title_tags(p["uid"]): p["info"] = {**p["info"], "title_tags": tags}
+        if voice := voice_of(p["uid"]): p["info"] = {**p["info"], "voice": voice}   # male voices get a share of draws
     kinds = {k: sum(p["kind"] == k for p in picks) for k in ("unsure", "confident", "unlabelled", "control")}
     print(f"{len(picks)} clips: {kinds}")
     if a.dry_run or not picks: return 0
