@@ -163,3 +163,17 @@ The original T2A framework (BERT text encoder, FiLM-conditioned U-Net, DDPM) is 
 > Alosh Denny, Anish S, M. Sudheep Elayidom. *T2A: A Novel Text2ASMR Framework for Generating Autonomous Sensory
 > Meridian Response Audio.* Proceedings of the National Student Conference on Trends in Computing (NSCTC 2024),
 > Edition 1, ISBN 978-81-955934-2-2. School of Engineering, Cochin University of Science and Technology.
+
+---
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE). That covers the code and documentation
+written for this project, not these:
+
+- **`docs/T2A_NSCTC2024.pdf`**: the paper. Copyright stays with its authors and the proceedings.
+- **`inference/refs/*.flac`**: short reference voice clips from creators' recordings, included only so the inference
+  scripts run. They are not licensed for reuse.
+- **Audio corpora, labels and model weights**: they live on Hugging Face, not here, and each carries its own terms.
+  The source audio belongs to its creators, and some sources are non-commercial (for example the Expresso voices used
+  in "Real or AI?" are CC BY-NC 4.0).
