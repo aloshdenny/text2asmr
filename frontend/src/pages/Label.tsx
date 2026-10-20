@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
-import HeadphonesPrompt from '../components/HeadphonesPrompt'
+import HeadphonesPrompt, { headphonesSeen } from '../components/HeadphonesPrompt'
 import Interlude, { type InterludeKind } from '../components/Interlude'
 import { AppLayout } from '../components/Layouts'
-import { Button, ButtonLink, Card, EmptyState, Icon, Kbd, Spinner, cx } from '../components/ui'
+import PreferencesPrompt, { prefsComplete, type Prefs } from '../components/Preferences'
+import TimelineLabeler from '../components/TimelineLabeler'
+import { Button, ButtonLink, Card, EmptyState, Icon, Kbd, Loading, Spinner, cx } from '../components/ui'
 import { KEYS, loadMenu, supabase, type Option } from '../lib/supabase'
 
 type Clip = { clip_id: string; audio_path: string; duration_s: number }
 type Phase = 'loading' | 'ready' | 'interlude' | 'empty' | 'error'
 type Due = { kind: InterludeKind; audio_a: string; audio_b: string | null }
+type State = { mode: 'tags' | 'timeline'; gold_done: number; gold_total: number; gold_votes: number; sound_pref: Prefs['sound']; content_pref: Prefs['content']; voice_pref: Prefs['voice']; beta: boolean }
 const SESSION_GOAL = 25
 
-export default function Label() {
+/** The classic labeller: tick every sound you hear in the clip. */
+function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
   const [menu, setMenu] = useState<Option[]>([])
   const [clip, setClip] = useState<Clip | null>(null)
   const [src, setSrc] = useState<string | null>(null)
@@ -18,8 +22,7 @@ export default function Label() {
   const [error, setError] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [other, setOther] = useState('')
-  const [unsure, setUnsure] = useState(false)
-  const [started, setStarted] = useState(false) // browsers only play sound after a click: the first clip waits for one
+  const [started, setStarted] = useState(headphonesSeen) // browsers only play sound after a click: the first clip waits for one
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState({ at: 0, dur: 0 })
   const [hint, setHint] = useState<Option | null>(null)
@@ -27,7 +30,7 @@ export default function Label() {
   const [totals, setTotals] = useState<{ total: number; today: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
-  const [intro, setIntro] = useState(true) // the headphones prompt, once per visit
+  const [intro, setIntro] = useState(() => !headphonesSeen()) // the headphones prompt, once per visit
   const [inter, setInter] = useState<{ kind: InterludeKind; a: string; b: string | null } | null>(null)
   const audio = useRef<HTMLAudioElement>(null)
   const otherRef = useRef<HTMLInputElement>(null)
@@ -42,7 +45,6 @@ export default function Label() {
     setPhase('loading')
     setPicked(new Set())
     setOther('')
-    setUnsure(false)
     setTime({ at: 0, dur: 0 })
     // every 8-17 labels the server has a quick break (Real or AI / Which is hotter) instead; the clip stays assigned
     const [due, clipRes] = await Promise.all([supabase.rpc('next_interlude'), supabase.rpc('next_clip')])
@@ -120,28 +122,20 @@ export default function Label() {
 
   const submit = async () => {
     if (!clip || busy || phase !== 'ready') return
-    if (picked.size === 0 && !unsure) return flash('Pick at least one label, or “Can’t tell”.')
+    if (picked.size === 0) return flash('Pick at least one label. Not sure? Tick “something else” and say what you hear.')
     if (listenedMs() < 1500) return flash('Listen to the clip first.')
     setBusy(true)
     const { data, error } = await supabase.rpc('submit_label', {
       p_clip: clip.clip_id,
       p_labels: [...picked],
       p_other: other.trim() || null,
-      p_unsure: unsure,
+      p_unsure: false,
       p_listen_ms: listenedMs(),
     })
     setBusy(false)
     if (error) return flash(error.message)
     setTotals((data as { total: number; today: number }[])[0])
     setDone((d) => d + 1)
-    next()
-  }
-
-  const skip = async () => {
-    if (!clip || busy) return
-    setBusy(true)
-    await supabase.rpc('skip_clip', { p_clip: clip.clip_id })
-    setBusy(false)
     next()
   }
 
@@ -168,11 +162,7 @@ export default function Label() {
       e.preventDefault()
       submit()
     } else if (k === 'r') replay()
-    else if (k === 'u') setUnsure((u) => !u)
-    else if (e.key === 'Escape') {
-      setPicked(new Set())
-      setUnsure(false)
-    }
+    else if (e.key === 'Escape') setPicked(new Set())
   })
   useEffect(() => {
     const f = (e: KeyboardEvent) => onKey(e)
@@ -185,7 +175,7 @@ export default function Label() {
   const pct = time.dur ? Math.min(100, (time.at / time.dur) * 100) : 0
 
   return (
-    <AppLayout width="narrow">
+    <>
       <div className="mb-5 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 text-sm text-ink-muted">
           <div className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-hover" aria-label={`${done} of ${SESSION_GOAL} this session`}>
@@ -196,7 +186,13 @@ export default function Label() {
             {totals && <span className="hidden sm:inline"> · {totals.today} today · {totals.total.toLocaleString()} all time</span>}
           </span>
         </div>
+        <button onClick={onBeta} className="shrink-0 text-xs font-medium text-brand hover:underline">Try the timeline beta</button>
       </div>
+      {state.gold_total > 0 && (
+        <p className="-mt-3 mb-4 text-xs text-ink-muted">
+          Gold set: <span className="font-medium tabular-nums text-ink">{state.gold_done}</span> of {state.gold_total} clips have {state.gold_votes} listeners. When they all do, the timeline labeller opens for everyone.
+        </p>
+      )}
 
       {phase === 'empty' && (
         <EmptyState title="You’ve heard every clip" description="Thank you, that’s the whole queue. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
@@ -319,17 +315,13 @@ export default function Label() {
           </Card>
 
           <div className="mt-3 flex items-center gap-2">
-            <Button variant={unsure ? 'secondary' : 'ghost'} aria-pressed={unsure} onClick={() => setUnsure((u) => !u)} className={cx(unsure && 'border-brand-border bg-brand-soft text-brand')}>
-              Can’t tell <Kbd className="max-sm:hidden">U</Kbd>
-            </Button>
-            <Button variant="ghost" onClick={skip} disabled={busy || phase !== 'ready'}>Skip</Button>
             <span className="flex-1" />
             <Button variant="primary" onClick={submit} disabled={busy || phase !== 'ready'}>
               Submit <Kbd className="border-white/30 bg-transparent text-white/80 max-sm:hidden">↵</Kbd>
             </Button>
           </div>
           <p className="mt-4 hidden text-xs text-ink-muted sm:block">
-            <Kbd>1</Kbd> to <Kbd>0</Kbd> and the letters on each label toggle it · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>U</Kbd> can’t tell · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
+            <Kbd>1</Kbd> to <Kbd>0</Kbd> and the letters on each label toggle it · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
           </p>
         </>
       )}
@@ -347,6 +339,36 @@ export default function Label() {
           onClosed={() => setIntro(false)}
         />
       )}
+    </>
+  )
+}
+
+/** Preferences first (asked once), then the classic labeller or the timeline one (when the gold set is complete, or as
+ *  an opt-in beta). */
+export default function Label() {
+  const [state, setState] = useState<State | null>(null)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.rpc('labelling_state')
+    if (error) return setError(error.message)
+    setState((data as State[])[0])
+  }, [])
+  useEffect(() => { load() }, [load])
+  const setBeta = async (on: boolean) => {
+    await supabase.rpc('set_preferences', { p_beta: on })
+    load()
+  }
+  if (error) return <AppLayout width="narrow"><EmptyState title="Something went wrong" description={error} action={<Button onClick={load}>Try again</Button>} /></AppLayout>
+  if (!state) return <AppLayout width="narrow"><Loading /></AppLayout>
+  const prefs: Prefs = { sound: state.sound_pref, content: state.content_pref, voice: state.voice_pref }
+  if (!prefsComplete(prefs)) {
+    return <AppLayout width="narrow"><PreferencesPrompt initial={prefs} onSaved={() => load()} /></AppLayout>
+  }
+  return (
+    <AppLayout width={state.mode === 'timeline' ? 'default' : 'narrow'}>
+      {state.mode === 'timeline'
+        ? <TimelineLabeler beta={state.beta} onLeaveBeta={() => setBeta(false)} />
+        : <TagLabeler state={state} onBeta={() => setBeta(true)} />}
     </AppLayout>
   )
 }

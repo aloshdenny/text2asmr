@@ -5,11 +5,11 @@ select plan(16);
 
 -- the menu, as anyone sees it
 set local role anon;
-select is((select count(*) from public.label_options), 33::bigint, 'the menu has 33 labels');
+select is((select count(*) from public.label_options), 34::bigint, 'the menu has 34 labels');
 select is((select count(*) from public.label_options where grp = 'NSFW'), 10::bigint, 'ten of them are in the NSFW group');
 select is((select grp from public.label_options where key = 'clapping'), 'Triggers', 'plain clapping is a trigger');
-select is((select title from public.label_options where key = 'sex slapping'), 'clapping😉', 'sex slapping shows as clapping😉');
-select is((select count(*) from public.label_options where title is null), 32::bigint, 'every other label shows its key');
+select is((select title from public.label_options where key = 'sex slapping'), 'fucking', 'sex slapping shows as fucking');
+select is((select count(*) from public.label_options where title is null), 33::bigint, 'every other label shows its key');
 select is((select count(*) from public.label_options where added_at = '2026-10-02 00:00:00+00'), 20::bigint,
           'the first twenty keep their launch date');
 select ok((select min(added_at) from public.label_options where sort > 20) > '2026-10-17', 'the new ones are dated when they were added');
@@ -56,8 +56,8 @@ select results_eq($$select s.source_uid, c.boost from public.clips c join privat
                   'a new-label title tag boosts 0.5, a thin unsure class 0.3, anything else 0');
 select is(private.thin_boost('{"unsure": ["brushing"]}'::jsonb), 0.3::real, 'the older thin classes keep 0.3');
 
-select is((select array_agg(key order by sort) from public.label_options where sort > 31), array['laughing', 'gasping'],
-          'laughing and gasping joined the menu');
+select is((select array_agg(key order by sort) from public.label_options where sort > 31), array['laughing', 'gasping', 'singing'],
+          'laughing, gasping and singing joined the menu');
 select is((select grp from public.label_options where key = 'gasping'), 'Voice', 'gasping is a voice sound');
 
 select * from finish();

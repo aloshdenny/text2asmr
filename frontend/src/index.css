@@ -213,3 +213,7 @@ body {
   .hp-backdrop, .hp-panel, .hp-out, .hp-out .hp-panel, .hp-bob { animation: none; }
   .hp-wave { animation: none; opacity: 0.7; }
 }
+
+/* sideways label rows in the timeline labeller: scroll by touch, wheel or the arrows, no scrollbar */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

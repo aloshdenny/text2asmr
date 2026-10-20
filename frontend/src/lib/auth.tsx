@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 
@@ -31,16 +31,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const uid = session?.user.id ?? null
+  const latest = useRef(0)
+  // reads the session itself rather than a captured uid: right after a guest signs in, the caller's render still has
+  // the old (empty) session, and a fetch started before start_guest made the profile must not overwrite a newer one
   const refreshProfile = useCallback(async () => {
-    if (!uid) return
-    const { data } = await supabase.from('profiles').select('id, username, display_name, avatar_url, onboarded, guest').eq('id', uid).maybeSingle()
+    const call = ++latest.current
+    const { data: auth } = await supabase.auth.getSession()
+    const id = auth.session?.user.id
+    if (!id) return
+    const { data } = await supabase.from('profiles').select('id, username, display_name, avatar_url, onboarded, guest').eq('id', id).maybeSingle()
+    if (call !== latest.current) return
     setProfile(data as Profile | null)
-    setProfileOf(uid)
-  }, [uid])
+    setProfileOf(id)
+  }, [])
 
   useEffect(() => {
     refreshProfile()
-  }, [refreshProfile])
+  }, [uid, refreshProfile])
 
   const loading = !ready || (uid !== null && profileOf !== uid)
   return (

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Button, cx } from './ui'
 
+/** The headphones prompt shows once per visit, whichever labeller is open (its click is also what lets audio play). */
+export const headphonesSeen = () => { try { return sessionStorage.getItem('asmrboard-headphones') === '1' } catch { return false } }
+export const markHeadphonesSeen = () => { try { sessionStorage.setItem('asmrboard-headphones', '1') } catch { /* private mode */ } }
+
 /** Headphones with sound waves breathing out of both ear cups. */
 function HeadphonesArt() {
   return (
@@ -27,6 +31,7 @@ export default function HeadphonesPrompt({ onReady, onClosed }: { onReady: () =>
   const ready = () => {
     if (leaving) return
     onReady()
+    markHeadphonesSeen()
     setLeaving(true)
     window.setTimeout(onClosed, 220)
   }

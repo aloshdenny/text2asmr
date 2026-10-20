@@ -52,7 +52,7 @@ def main() -> int:
             fh.write(json.dumps({"who": r["labeller"], "username": r["username"], "uid": r["source_uid"], "labels": r["labels"],
                                  "skipped": r["unsure"] and not r["labels"], "unsure": r["unsure"],
                                  "other": r["other_text"], "menu": menu, "kind": r["kind"],
-                                 "listen_ms": r["listen_ms"], "trust": r.get("trust"), "quality": r.get("quality"),
+                                 "listen_ms": r["listen_ms"], "trust": r.get("trust"), "quality": r.get("quality"), "spans": r.get("spans"),
                                  "at": r["created_at"]}) + "\n")
     print(f"{len(rows)} labels from {len(n)} listeners; wrote {len(keep)} from {sum(v >= a.min_labels for v in n.values())} "
           f"listeners with >= {a.min_labels} labels -> {a.out}")

@@ -172,7 +172,10 @@ def main() -> int:
     if len(picks) < n: print(f"left out {n - len(picks)} clips whose recording titles the content filter blocks")
     for p in picks:                                           # the sounds the title promises: they decide what people hear first
         if tags := title_tags(p["uid"]): p["info"] = {**p["info"], "title_tags": tags}
-        if voice := voice_of(p["uid"]): p["info"] = {**p["info"], "voice": voice}   # male voices get a share of draws
+        if voice := voice_of(p["uid"]):                       # male voices get a share of draws
+            p["info"] = {**p["info"], "voice": voice}
+            # the voice corpora count as NSFW, unless the recording's title says SFW (labellers can opt out of NSFW)
+            if re.search(r"(?<![a-z])sfw(?![a-z])", re.sub(r"[-_.]+", " ", p["uid"].lower())): p["info"]["nsfw"] = False
     kinds = {k: sum(p["kind"] == k for p in picks) for k in ("unsure", "confident", "unlabelled", "control")}
     print(f"{len(picks)} clips: {kinds}")
     if a.dry_run or not picks: return 0

@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AvatarPicker from '../components/AvatarPicker'
 import { AppLayout } from '../components/Layouts'
+import { PreferenceFields, type Prefs } from '../components/Preferences'
 import { Alert, Button, Card, CardHeader, Field, Input, PageHeader } from '../components/ui'
 import { useAuth, type Profile } from '../lib/auth'
 import { supabase } from '../lib/supabase'
@@ -79,6 +80,8 @@ function SettingsForm({ profile, uid }: { profile: Profile; uid: string }) {
           </form>
         </Card>
 
+        <LabellingSettings />
+
         <Card>
           <CardHeader
             title="Delete account"
@@ -95,5 +98,34 @@ function SettingsForm({ profile, uid }: { profile: Profile; uid: string }) {
         </Card>
       </div>
     </AppLayout>
+  )
+}
+
+/** What you label (private: only you see it) and the timeline beta. */
+function LabellingSettings() {
+  const [state, setState] = useState<{ prefs: Prefs; beta: boolean } | null>(null)
+  const load = () =>
+    supabase.rpc('labelling_state').then(({ data }) => {
+      const r = (data as { sound_pref: Prefs['sound']; content_pref: Prefs['content']; voice_pref: Prefs['voice']; beta: boolean }[] | null)?.[0]
+      if (r) setState({ prefs: { sound: r.sound_pref, content: r.content_pref, voice: r.voice_pref }, beta: r.beta })
+    })
+  useEffect(() => { load() }, [])
+  if (!state) return null
+  const toggleBeta = async () => {
+    await supabase.rpc('set_preferences', { p_beta: !state.beta })
+    load()
+  }
+  return (
+    <Card>
+      <CardHeader title="What you label" description="We only send you clips you’re comfortable with. Only you can see these answers." />
+      <PreferenceFields initial={state.prefs} onSaved={(prefs) => setState((s) => (s ? { ...s, prefs } : s))} />
+      <div className="mt-5 flex items-center justify-between gap-4 border-t border-hairline pt-4">
+        <div>
+          <p className="text-sm font-medium text-ink">Timeline labelling <span className="ml-1 rounded bg-brand-soft px-1.5 py-0.5 text-[11px] font-medium text-brand">Beta</span></p>
+          <p className="text-sm text-ink-muted">Mark when each sound starts and ends, to the millisecond.</p>
+        </div>
+        <Button variant={state.beta ? 'primary' : 'secondary'} onClick={toggleBeta} aria-pressed={state.beta}>{state.beta ? 'On' : 'Off'}</Button>
+      </div>
+    </Card>
   )
 }
