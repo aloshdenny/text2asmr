@@ -58,6 +58,7 @@ export default function Signup() {
         </Field>
         {error && <Alert>{error}</Alert>}
         <Button type="submit" variant="primary" disabled={busy} className="w-full">{busy ? 'Creating account…' : 'Create account'}</Button>
+        <p className="text-xs text-ink-muted">To spot duplicate accounts, the site keeps scrambled codes for this browser and network. They can’t be turned back into your IP address and are deleted after 180 days without use.</p>
         <p className="text-center text-sm text-ink-muted">
           Already have an account? <Link to="/login" className="font-medium text-brand hover:underline">Log in</Link>
         </p>

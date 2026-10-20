@@ -51,6 +51,7 @@ export default function Start() {
         </label>
         {error && <Alert>{error}</Alert>}
         <Button variant="primary" disabled={busy} className="w-full" onClick={start}>{busy ? 'Starting…' : 'Start labelling'}</Button>
+        <p className="text-xs text-ink-muted">To spot duplicate accounts, the site keeps scrambled codes for this browser and network. They can’t be turned back into your IP address and are deleted after 180 days without use.</p>
         <p className="text-center text-sm text-ink-muted">
           Want to be on the leaderboard? <Link to="/signup" className="font-medium text-brand hover:underline">Create an account</Link>
         </p>

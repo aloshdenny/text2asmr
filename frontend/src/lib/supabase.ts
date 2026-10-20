@@ -3,7 +3,24 @@ import { createClient } from '@supabase/supabase-js'
 /** Supabase is reached only through this site's /sb proxy (vite.config.ts in dev, api/sb.ts on Vercel), which adds
  *  the API key server-side: no project URL or key ships in the bundle. "public" is a placeholder the proxy replaces. */
 export const API = `${window.location.origin}/sb`
-export const supabase = createClient(API, 'public')
+
+/** A random id for this browser, not tied to the person. It lets the site tell several accounts made on one device
+ *  apart from several people; the /sb proxy scrambles it (with the network) before anything is stored. */
+function deviceId(): string | null {
+  try {
+    let id = localStorage.getItem('asmrboard-device')
+    if (!id) {
+      id = crypto.randomUUID()
+      localStorage.setItem('asmrboard-device', id)
+    }
+    return id
+  } catch {
+    return null // storage blocked: no device mark, everything else works
+  }
+}
+
+const device = deviceId()
+export const supabase = createClient(API, 'public', device ? { global: { headers: { 'x-ab-device-id': device } } } : undefined)
 
 /** An avatar is an https URL or an object in the public "avatars" bucket. */
 export const avatarSrc = (url?: string | null) =>
