@@ -74,13 +74,12 @@ export default function Home() {
   const goal = milestone(answers)
   // never round up to a full ring before the milestone is actually reached (4,999 of 5,000 is 99.9%, not 100%)
   const human = progress ? Math.min(pct(answers, goal), answers < goal ? 99.9 : 100) : 0
-  const ai = progress ? pct(progress.ai_labelled_recordings, progress.corpus_recordings) : 0
   const signedIn = Boolean(session && profile?.onboarded)
   return (
     <AppLayout>
       <section className="max-w-2xl pb-4 pt-6 sm:pt-12">
         <p className="text-sm font-medium text-ink-muted">A community dataset for text2asmr</p>
-        <h1 className="mt-3 text-4xl font-semibold tracking-tight text-ink sm:text-5xl">Teach machines to generate ASMR.</h1>
+        <h1 className="mt-3 text-balance text-4xl font-semibold tracking-tight text-ink sm:text-5xl">A music project to teach machines to generate ASMR.</h1>
         <p className="mt-4 text-[17px] leading-relaxed text-ink-secondary">
           We’re an open platform where anyone can help label audio for the OpenASMR project. Every clip you label
           counts toward your place on the board.
@@ -100,19 +99,14 @@ export default function Home() {
         <p className="mt-4 text-xs text-ink-muted">{signedIn ? '' : 'No sign-up needed. '}18+ only. Some clips contain intimate vocal sounds.</p>
       </section>
 
-      <Card className="mt-10 py-8">
-        <div className="flex flex-wrap items-start justify-center gap-x-6 gap-y-8 sm:gap-x-24">
+      <Card className="mt-10 py-10">
+        <div className="flex justify-center">
           <Ring
+            size={204}
             percent={human}
             color="var(--ring-green)"
             label="labelled by people"
             caption={progress ? `${n(answers)} of ${n(goal)} labels, the next milestone` : ''}
-          />
-          <Ring
-            percent={ai}
-            color="var(--brand)"
-            label="labelled by AI (CLAP-ASMR)"
-            caption={progress ? `${n(progress.ai_labelled_recordings)} of ${n(progress.corpus_recordings)} recordings` : ''}
           />
         </div>
       </Card>
