@@ -31,7 +31,7 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState(profile?.display_name ?? '')
   const [avatar, setAvatar] = useState<string | null>(profile?.avatar_url ?? null)
-  const [adult, setAdult] = useState(linking)
+  const [adult, setAdult] = useState(false)          // asked again of a guest: signing up is what opens adult clips
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 

@@ -6,6 +6,7 @@ import PreferencesPrompt, { prefsComplete, type Prefs } from '../components/Pref
 import TimelineLabeler from '../components/TimelineLabeler'
 import PixelCritter from '../components/PixelCritter'
 import { Button, ButtonLink, Card, EmptyState, Icon, Input, Kbd, Loading, Spinner, cx } from '../components/ui'
+import { useAuth } from '../lib/auth'
 import { KEYS, loadMenu, supabase, type Option } from '../lib/supabase'
 
 type Clip = { clip_id: string; audio_path: string; duration_s: number }
@@ -335,8 +336,10 @@ function TagLabeler() {
 }
 
 /** Preferences first (asked once), then the classic labeller or the timeline one (when the gold set is complete, or for
- *  someone opted into the beta: /label?beta=1 turns it on for that account, ?beta=0 off; nothing in the UI mentions it). */
+ *  someone opted into the beta: /label?beta=1 turns it on for that account, ?beta=0 off; nothing in the UI mentions it).
+ *  Guests are never asked: they get SFW clips only (the database keeps them there) until they sign up. */
 export default function Label() {
+  const { profile } = useAuth()
   const [state, setState] = useState<State | null>(null)
   const [error, setError] = useState('')
   const load = useCallback(async () => {
@@ -357,7 +360,7 @@ export default function Label() {
   if (error) return <AppLayout width="narrow"><EmptyState title="Something went wrong" description={error} action={<Button onClick={load}>Try again</Button>} /></AppLayout>
   if (!state) return <AppLayout width="narrow"><Loading /></AppLayout>
   const prefs: Prefs = { sound: state.sound_pref, content: state.content_pref, voice: state.voice_pref }
-  if (!prefsComplete(prefs)) {
+  if (!profile?.guest && !prefsComplete(prefs)) {
     return <AppLayout width="narrow"><PreferencesPrompt initial={prefs} onSaved={() => load()} /></AppLayout>
   }
   return (
