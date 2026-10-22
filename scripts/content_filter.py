@@ -20,7 +20,9 @@ BLOCK = re.compile(r"daughter|step[- ]?(dad|mom|mum|daughter|son|sis|bro|father|
                    r"|(?<![a-z])(child|kid|kids|minor|underage|loli)(?![a-z])"
                    # 2026-10-18: titles saying incest outright, and sibling / extended-family roleplay, were getting through
                    r"|incest|mom ?son|(?<![a-z])(sister|sisters|sis|sibling|siblings|cousin|cousins|aunt|auntie|uncle|niece|nephew)(?![a-z])"
-                   r"|(little|big|baby|older|younger|step) ?brother")
+                   r"|(little|big|baby|older|younger|step) ?brother"
+                   # 2026-10-22: school settings named without "school" ("Omega classmate in heat")
+                   r"|classmates?|homeroom|(?<![a-z])prom(?![a-z])")
 
 
 def blocked_title(path: str) -> bool:
