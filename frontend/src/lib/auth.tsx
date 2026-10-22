@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import { clearReferral, pendingReferral } from './referral'
 import { supabase } from './supabase'
 
 export type Profile = { id: string; username: string; display_name: string | null; avatar_url: string | null; onboarded: boolean; guest: boolean }
@@ -48,6 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshProfile()
   }, [uid, refreshProfile])
+
+  // a referral link followed before this profile existed is credited once the profile is there
+  const profileId = profile?.id
+  useEffect(() => {
+    const ref = profileId && pendingReferral()
+    if (ref) supabase.rpc('set_referral', { p_ref: ref }).then(({ error }) => { if (!error) clearReferral() })
+  }, [profileId])
 
   const loading = !ready || (uid !== null && profileOf !== uid)
   return (

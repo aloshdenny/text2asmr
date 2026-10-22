@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { AppLayout } from './components/Layouts'
 import { Loading } from './components/ui'
 import { AuthProvider, useAuth } from './lib/auth'
+import { saveReferral } from './lib/referral'
 import Dashboard from './pages/Dashboard'
 import Home from './pages/Home'
 import Label from './pages/Label'
@@ -26,6 +27,12 @@ function RequireUser({ children, guestOk = false }: { children: ReactNode; guest
   return children
 }
 
+/** A creator's referral link: remember whose it was, then show the home page. */
+function Referral() {
+  const { handle = '' } = useParams()
+  saveReferral(handle)
+  return <Navigate to="/" replace />
+}
 
 export default function App() {
   return (
@@ -48,6 +55,7 @@ export default function App() {
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/u/:username" element={<Profile />} />
           <Route path="/guide" element={<Navigate to="/" replace />} />
+          <Route path="/r/:handle" element={<Referral />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
