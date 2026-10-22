@@ -31,11 +31,11 @@ export default function Ring({ percent, color, label, caption, size = 136 }: { p
             strokeDashoffset={c * (1 - Math.min(100, Math.max(0, shown)) / 100)}
           />
         </svg>
-        <span className="absolute inset-0 flex items-center justify-center font-semibold tracking-tight text-ink tabular-nums" style={{ fontSize: 28 * k }}>{percent.toFixed(1)}%</span>
+        <span className="absolute inset-0 flex items-center justify-center font-black tracking-tight text-ink tabular-nums" style={{ fontSize: 28 * k }}>{percent.toFixed(1)}%</span>
       </div>
       <figcaption className="text-center">
-        <span className="block font-medium text-ink" style={{ fontSize: 14 * k }}>{label}</span>
-        {caption && <span className="block text-ink-muted" style={{ fontSize: 12 * k }}>{caption}</span>}
+        <span className="block font-extrabold text-ink" style={{ fontSize: 14 * k }}>{label}</span>
+        {caption && <span className="block font-semibold text-ink-muted" style={{ fontSize: 12 * k }}>{caption}</span>}
       </figcaption>
     </figure>
   )

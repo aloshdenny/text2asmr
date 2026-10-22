@@ -3,21 +3,26 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import Avatar from './Avatar'
+import PixelCritter from './PixelCritter'
 import { ButtonLink, Icon, ThemeToggle, cx } from './ui'
 
+/** The mascot: a lavender bunny with violet headphones, listening with its eyes closed. */
+export function Mascot({ size = 32, className }: { size?: number; className?: string }) {
+  return <PixelCritter seed="asmrboard" kind="bunny" body="#b9a3f5" phones="#7c5cff" bg="#f1edff" sleepy size={size} className={className} />
+}
+
 /** Always the landing page; on the landing page itself a click does nothing (no reload, no new history entry). */
-export function Brand({ className }: { className?: string }) {
+export function Brand({ className, mascotOnly = false }: { className?: string; mascotOnly?: boolean }) {
   const { pathname } = useLocation()
   return (
     <Link
       to="/"
       onClick={(e) => pathname === '/' && e.preventDefault()}
-      className={cx('inline-flex items-center gap-2 text-[15px] font-semibold tracking-tight text-ink', className)}
+      aria-label="ASMR Board"
+      className={cx('inline-flex items-center gap-2.5 text-xl font-black tracking-tight text-brand', className)}
     >
-      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-brand" aria-hidden="true">
-        <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" fill="none" />
-      </svg>
-      ASMR Board
+      <span className={cx('overflow-hidden rounded-xl', mascotOnly && 'critter-bob')}><Mascot size={mascotOnly ? 56 : 32} /></span>
+      {!mascotOnly && 'ASMR Board'}
     </Link>
   )
 }
@@ -42,22 +47,22 @@ function AccountMenu() {
     }
   }, [open])
   if (!profile) return null
-  const item = 'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink'
+  const item = 'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm font-bold text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink'
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
+        className="flex items-center gap-2 rounded-2xl py-1 pl-1 pr-2 transition-colors hover:bg-surface-hover"
       >
-        <Avatar name={profile.username} url={profile.avatar_url} size={26} />
-        <span className="hidden text-[13px] font-medium text-ink sm:inline">{profile.guest ? 'Guest' : profile.username}</span>
+        <Avatar name={profile.username} url={profile.avatar_url} size={34} />
+        <span className="hidden text-sm font-extrabold text-ink sm:inline">{profile.guest ? 'Guest' : profile.username}</span>
         <Icon className="h-3.5 w-3.5 text-ink-muted"><path d="m6 9 6 6 6-6" /></Icon>
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-20 mt-1.5 w-52 rounded-xl border border-hairline bg-surface-raised p-1 shadow-[0_10px_30px_-12px_rgb(0_0_0/0.25)]">
-          <div className="px-2.5 pb-1.5 pt-1 text-xs text-ink-muted">
+        <div role="menu" className="absolute right-0 top-full z-20 mt-2 w-56 rounded-2xl border-2 border-hairline bg-surface-raised p-1.5">
+          <div className="px-3 pb-1.5 pt-1 text-xs font-semibold text-ink-muted">
             {profile.guest ? 'Labelling as a guest' : <>Signed in as <span className="font-medium text-ink">@{profile.username}</span></>}
           </div>
           {profile.guest && (
@@ -76,7 +81,7 @@ function AccountMenu() {
               <Icon><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></Icon>Edit profile
             </Link>
           )}
-          <div className="my-1 h-px bg-hairline" />
+          <div className="my-1 h-0.5 bg-hairline" />
           <button
             role="menuitem"
             className={item}
@@ -96,7 +101,7 @@ function AccountMenu() {
 export default function TopBar() {
   const { session, profile, loading } = useAuth()
   return (
-    <header className="sticky top-0 z-10 border-b border-hairline bg-surface/85 backdrop-blur-md">
+    <header className="sticky top-0 z-10 border-b-2 border-hairline bg-surface">
       <div className="mx-auto flex h-[var(--topbar-height)] max-w-5xl items-center gap-3 px-4 sm:px-6">
         <Brand />
         <div className="ml-auto flex items-center gap-2">

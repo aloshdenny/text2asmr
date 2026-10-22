@@ -1,82 +1,88 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Design tokens -- the Clardentity house style: neutral surfaces, hairline
-   borders, one accent blue. Colour appears only on the primary action, links,
-   selected state and the contribution graph, where it is the signal.
-   Light is the theme; dark is opt-in through the toggle ([data-theme]).
+   Design tokens. Friendly and chunky: rounded Nunito, 2px borders, buttons that
+   sit on a darker edge and press down, one violet for everything you act on.
+   No gradients, no glass, no soft shadows. Light is the default; dark through
+   the toggle ([data-theme]).
 --------------------------------------------------------------------------- */
 :root {
   --canvas: #ffffff;
   --surface: #ffffff;
-  --surface-muted: #f5f5f7;
-  --surface-hover: #ebebed;
+  --surface-muted: #f6f5fa;
+  --surface-hover: #efeef6;
   --surface-raised: #ffffff;
 
-  --border: #d2d2d7;
-  --border-strong: #c7c7cc;
+  --border: #e6e4ef;
+  --border-strong: #d6d3e3;
 
-  --text: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-muted: #86868b;
+  --text: #3b3a4a;
+  --text-secondary: #6f6d82;
+  --text-muted: #a09eb3;
   --text-inverse: #ffffff;
 
-  --brand: #0071e3;
-  --brand-dark: #0077ed;
-  --brand-soft: #f0f6fe;
-  --brand-border: #b9dcff;
+  --brand: #7c5cff;
+  --brand-dark: #6142e6;      /* the edge a brand button sits on */
+  --brand-soft: #f1edff;
+  --brand-border: #cbbfff;
 
-  --danger: #d70015;
-  --danger-bg: #fff2f2;
-  --danger-border: #f8cbcb;
-  --ok: #248a3d;
-  --ring-green: #34c759;
+  --danger: #ea4b5b;
+  --danger-dark: #c93444;
+  --danger-bg: #fff0f2;
+  --danger-border: #ffc7cf;
+  --ok: #2fa84f;
+  --ok-dark: #23893e;
+  --ok-soft: #e9f9ee;
+  --ring-green: #4cc764;
 
-  --focus-ring: #0071e3;
+  --focus-ring: #7c5cff;
 
   /* contribution graph: empty, then four steps of the accent */
-  --hm-0: #ebebed;
-  --hm-1: #b9dcff;
-  --hm-2: #69b1f7;
-  --hm-3: #2a8af0;
-  --hm-4: #0058b9;
+  --hm-0: #efeef6;
+  --hm-1: #d9d0ff;
+  --hm-2: #b3a1ff;
+  --hm-3: #8c70ff;
+  --hm-4: #5b3be0;
 
-  --topbar-height: 56px;
+  --topbar-height: 64px;
 }
 
 :root[data-theme="dark"] {
-  --canvas: #000000;
-  --surface: #0b0b0d;
-  --surface-muted: #000000;
-  --surface-hover: #161618;
-  --surface-raised: #1c1c1e;
+  --canvas: #16151f;
+  --surface: #1d1c29;
+  --surface-muted: #23222f;
+  --surface-hover: #2a2938;
+  --surface-raised: #242332;
 
-  --border: #212124;
-  --border-strong: #2e2e31;
+  --border: #343244;
+  --border-strong: #423f55;
 
-  --text: #f5f5f7;
-  --text-secondary: #a1a1a6;
-  --text-muted: #86868b;
-  --text-inverse: #000000;
+  --text: #f1f0f8;
+  --text-secondary: #b3b1c6;
+  --text-muted: #7f7d94;
+  --text-inverse: #16151f;
 
-  --brand: #2997ff;
-  --brand-dark: #0a84ff;
-  --brand-soft: #0b1c2e;
-  --brand-border: #1f4468;
+  --brand: #9b85ff;
+  --brand-dark: #7559f0;
+  --brand-soft: #2a2446;
+  --brand-border: #4f4385;
 
-  --danger: #ff453a;
-  --danger-bg: #260d0c;
-  --danger-border: #55201d;
-  --ok: #30d158;
-  --ring-green: #30d158;
+  --danger: #ff6b7a;
+  --danger-dark: #d94a5a;
+  --danger-bg: #2c1519;
+  --danger-border: #5a2730;
+  --ok: #55d475;
+  --ok-dark: #3cae5b;
+  --ok-soft: #162b1d;
+  --ring-green: #55d475;
 
-  --focus-ring: #2997ff;
+  --focus-ring: #9b85ff;
 
-  --hm-0: #161618;
-  --hm-1: #0e2c4a;
-  --hm-2: #155192;
-  --hm-3: #1f7ad6;
-  --hm-4: #5fb2ff;
+  --hm-0: #2a2938;
+  --hm-1: #3a3166;
+  --hm-2: #5641a8;
+  --hm-3: #7a5ff0;
+  --hm-4: #b3a1ff;
 }
 
 @theme inline {
@@ -99,7 +105,10 @@
   --color-danger-bg: var(--danger-bg);
   --color-danger-border: var(--danger-border);
   --color-ok: var(--ok);
-  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --color-ok-dark: var(--ok-dark);
+  --color-ok-soft: var(--ok-soft);
+  --color-danger-dark: var(--danger-dark);
+  --font-sans: "Nunito Variable", "Nunito", ui-rounded, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -117,7 +126,7 @@ body {
 :where(a, button, input, textarea, select, [tabindex]):focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: 14px;
 }
 
 /* Theme-conditional markup (the toggle's icon), right in the first paint. */
@@ -217,3 +226,33 @@ body {
 /* sideways label rows in the timeline labeller: scroll by touch, wheel or the arrows, no scrollbar */
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* chunky buttons and tiles: they sit on a darker edge (--edge) and press down onto it */
+.press {
+  box-shadow: 0 var(--lift, 4px) 0 var(--edge, var(--border));
+  transition: transform 0.06s ease, box-shadow 0.06s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.press:active:not(:disabled) {
+  transform: translateY(var(--lift, 4px));
+  box-shadow: 0 0 0 var(--edge, var(--border));
+}
+.press:disabled { box-shadow: 0 var(--lift, 4px) 0 var(--border); }
+
+/* a selected label tile pops once */
+@keyframes pop { 40% { transform: scale(1.06); } }
+.pop { animation: pop 0.22s ease-out; }
+
+/* pixel critters breathe; their sound waves pulse */
+@keyframes critter-bob { 50% { transform: translateY(-4%); } }
+.critter-bob { animation: critter-bob 2.8s ease-in-out infinite; }
+@keyframes wave-out { 0% { opacity: 0; transform: scale(0.8); } 30% { opacity: 1; } 100% { opacity: 0; transform: scale(1.25); } }
+.wave-out { animation: wave-out 2.2s ease-out infinite; transform-origin: center; }
+
+/* "nice!" feedback after a label goes in */
+@keyframes cheer-in { from { opacity: 0; transform: translateY(12px); } }
+.cheer-in { animation: cheer-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pop, .critter-bob, .wave-out, .cheer-in { animation: none; }
+  .press:active:not(:disabled) { transform: none; }
+}

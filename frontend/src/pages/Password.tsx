@@ -22,9 +22,9 @@ export function ForgotPassword() {
   }
   return (
     <AuthLayout>
-      <form onSubmit={submit} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">Reset your password</h1>
+      <form onSubmit={submit} className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Reset your password</h1>
           <p className="text-sm text-ink-muted">{sent ? `If ${email.trim()} has an account, a reset link is on its way.` : 'We’ll email you a link to choose a new one.'}</p>
         </div>
         {!sent && (
@@ -59,10 +59,10 @@ export function AuthConfirm() {
   }, [params, navigate])
   return (
     <AuthLayout>
-      <div className="space-y-4 rounded-xl border border-hairline bg-surface p-6">
+      <div className="space-y-4">
         {error ? (
           <>
-            <h1 className="text-xl font-semibold text-ink">That link didn’t work</h1>
+            <h1 className="text-center text-[26px] font-black tracking-tight text-ink">That link didn’t work</h1>
             <p className="text-sm text-ink-muted">{error}. Links work once and expire after an hour.</p>
             <ButtonLink to="/login" className="w-full">Back to log in</ButtonLink>
           </>
@@ -93,9 +93,9 @@ export function ResetPassword() {
   }
   return (
     <AuthLayout>
-      <form onSubmit={save} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">Choose a new password</h1>
+      <form onSubmit={save} className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Choose a new password</h1>
           <p className="text-sm text-ink-muted">For {session.user.email}.</p>
         </div>
         <Field label="New password" htmlFor="password" hint="At least 8 characters.">

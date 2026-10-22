@@ -4,17 +4,18 @@ import Interlude, { type InterludeKind } from '../components/Interlude'
 import { AppLayout } from '../components/Layouts'
 import PreferencesPrompt, { prefsComplete, type Prefs } from '../components/Preferences'
 import TimelineLabeler from '../components/TimelineLabeler'
-import { Button, ButtonLink, Card, EmptyState, Icon, Kbd, Loading, Spinner, cx } from '../components/ui'
+import PixelCritter from '../components/PixelCritter'
+import { Button, ButtonLink, Card, EmptyState, Icon, Input, Kbd, Loading, Spinner, cx } from '../components/ui'
 import { KEYS, loadMenu, supabase, type Option } from '../lib/supabase'
 
 type Clip = { clip_id: string; audio_path: string; duration_s: number }
 type Phase = 'loading' | 'ready' | 'interlude' | 'empty' | 'error'
 type Due = { kind: InterludeKind; audio_a: string; audio_b: string | null }
+const CHEERS = ['Nice ears!', 'Got it!', 'Lovely, thanks!', 'Sharp listening!', 'That helps a lot!', 'Tingly work!']
 type State = { mode: 'tags' | 'timeline'; gold_done: number; gold_total: number; gold_votes: number; sound_pref: Prefs['sound']; content_pref: Prefs['content']; voice_pref: Prefs['voice']; beta: boolean }
-const SESSION_GOAL = 25
 
 /** The classic labeller: tick every sound you hear in the clip. */
-function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
+function TagLabeler() {
   const [menu, setMenu] = useState<Option[]>([])
   const [clip, setClip] = useState<Clip | null>(null)
   const [src, setSrc] = useState<string | null>(null)
@@ -26,8 +27,7 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState({ at: 0, dur: 0 })
   const [hint, setHint] = useState<Option | null>(null)
-  const [done, setDone] = useState(0)
-  const [totals, setTotals] = useState<{ total: number; today: number } | null>(null)
+  const [cheer, setCheer] = useState<{ n: number; text: string } | null>(null) // a quick "nice!" after each answer
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
   const [intro, setIntro] = useState(() => !headphonesSeen()) // the headphones prompt, once per visit
@@ -125,7 +125,7 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
     if (picked.size === 0) return flash('Pick at least one label. Not sure? Tick “something else” and say what you hear.')
     if (listenedMs() < 1500) return flash('Listen to the clip first.')
     setBusy(true)
-    const { data, error } = await supabase.rpc('submit_label', {
+    const { error } = await supabase.rpc('submit_label', {
       p_clip: clip.clip_id,
       p_labels: [...picked],
       p_other: other.trim() || null,
@@ -134,8 +134,9 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
     })
     setBusy(false)
     if (error) return flash(error.message)
-    setTotals((data as { total: number; today: number }[])[0])
-    setDone((d) => d + 1)
+    const n = Date.now()
+    setCheer({ n, text: CHEERS[n % CHEERS.length] })
+    window.setTimeout(() => setCheer((c) => (c?.n === n ? null : c)), 1800)
     next()
   }
 
@@ -175,25 +176,7 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
   const pct = time.dur ? Math.min(100, (time.at / time.dur) * 100) : 0
 
   return (
-    <>
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 text-sm text-ink-muted">
-          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-hover" aria-label={`${done} of ${SESSION_GOAL} this session`}>
-            <div className="h-full rounded-full bg-brand transition-[width] duration-300" style={{ width: `${Math.min(100, (done / SESSION_GOAL) * 100)}%` }} />
-          </div>
-          <span>
-            <span className="font-medium text-ink tabular-nums">{done}</span> this session
-            {totals && <span className="hidden sm:inline"> · {totals.today} today · {totals.total.toLocaleString()} all time</span>}
-          </span>
-        </div>
-        <button onClick={onBeta} className="shrink-0 text-xs font-medium text-brand hover:underline">Try the timeline beta</button>
-      </div>
-      {state.gold_total > 0 && (
-        <p className="-mt-3 mb-4 text-xs text-ink-muted">
-          Gold set: <span className="font-medium tabular-nums text-ink">{state.gold_done}</span> of {state.gold_total} clips have {state.gold_votes} listeners. When they all do, the timeline labeller opens for everyone.
-        </p>
-      )}
-
+    <div className="pb-28">
       {phase === 'empty' && (
         <EmptyState title="You’ve heard every clip" description="Thank you, that’s the whole queue. New clips arrive regularly." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />
       )}
@@ -219,27 +202,27 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
               onClick={play}
               disabled={phase !== 'ready'}
               aria-label={playing ? 'Pause' : 'Play'}
-              className={cx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand text-white transition-colors hover:bg-brand-dark disabled:opacity-50', playing && 'play-ring')}
+              className={cx('press flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand text-white [--edge:var(--brand-dark)] disabled:opacity-50', playing && 'play-ring')}
             >
               {phase === 'loading' ? (
                 <Spinner className="text-white" />
               ) : playing ? (
-                <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+                <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1.5" /><rect x="14" y="5" width="4" height="14" rx="1.5" /></svg>
               ) : (
-                <svg viewBox="0 0 24 24" className="ml-0.5 h-5 w-5 fill-current" aria-hidden><path d="M8 5.5v13l11-6.5z" /></svg>
+                <svg viewBox="0 0 24 24" className="ml-0.5 h-6 w-6 fill-current" aria-hidden><path d="M8 5.5v13l11-6.5z" /></svg>
               )}
             </button>
             <div className="min-w-0 flex-1">
               <div className="mb-2 flex items-baseline justify-between gap-3 max-sm:flex-col max-sm:gap-0.5">
-                <span className="truncate text-sm font-medium text-ink">
+                <span className="truncate text-base font-extrabold text-ink">
                   {phase === 'loading' ? 'Loading the next clip…' : started ? 'What do you hear?' : 'Press play to start listening'}
                 </span>
-                <span className="shrink-0 font-mono text-xs tabular-nums text-ink-muted">
+                <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-ink-muted">
                   {time.at.toFixed(1)} / {(time.dur || clip?.duration_s || 0).toFixed(1)}s
                 </span>
               </div>
               <div
-                className="h-1.5 cursor-pointer overflow-hidden rounded-full bg-surface-hover"
+                className="h-3 cursor-pointer overflow-hidden rounded-full bg-surface-hover"
                 onClick={(e) => {
                   const a = audio.current
                   if (!a || !a.duration) return
@@ -251,8 +234,7 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
               </div>
             </div>
             <Button size="sm" variant="ghost" onClick={replay} disabled={phase !== 'ready'} title="Replay (R)" aria-label="Replay">
-              <Icon className="sm:hidden"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></Icon>
-              <span className="max-sm:hidden">Replay</span> <Kbd className="max-sm:hidden">R</Kbd>
+              <Icon className="h-5 w-5"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></Icon>
             </Button>
             {src && (
               <audio
@@ -269,12 +251,12 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
           </Card>
 
           <Card className="mt-3">
-            <p className="mb-4 text-sm text-ink-muted">Tick everything you can hear. Most clips have more than one sound.</p>
-            <div className="space-y-4">
+            <p className="mb-4 text-[15px] font-semibold text-ink-secondary">Tick everything you can hear. Most clips have more than one sound.</p>
+            <div className="space-y-5">
               {groups.map(([g, opts]) => (
                 <div key={g}>
-                  <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{g}</h3>
-                  <div className="flex flex-wrap gap-1.5">
+                  <h3 className="mb-2.5 text-xs font-extrabold uppercase tracking-[0.08em] text-ink-muted">{g}</h3>
+                  <div className="flex flex-wrap gap-2">
                     {opts.map((o) => {
                       const on = picked.has(o.key)
                       return (
@@ -286,8 +268,8 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
                           onFocus={() => setHint(o)}
                           onClick={() => toggle(o.key)}
                           className={cx(
-                            'inline-flex h-8 items-center gap-2 rounded-lg border pl-1.5 pr-2.5 text-[13px] transition-colors max-sm:pl-2.5',
-                            on ? 'border-brand-border bg-brand-soft font-medium text-brand' : 'border-hairline bg-surface text-ink hover:bg-surface-hover',
+                            'press inline-flex h-11 items-center gap-2 rounded-2xl border-2 px-3 text-[15px] font-bold [--lift:3px]',
+                            on ? 'pop border-brand-border bg-brand-soft text-brand [--edge:var(--brand-border)]' : 'border-hairline bg-surface text-ink [--edge:var(--border)] hover:bg-surface-hover',
                           )}
                         >
                           <Kbd className={cx('max-sm:hidden', on && 'border-brand-border bg-transparent text-brand')}>{keyOf(o)}</Kbd>
@@ -300,33 +282,42 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
               ))}
             </div>
             {picked.has('something else') && (
-              <input
+              <Input
                 ref={otherRef}
-                className="mt-4 h-9 w-full rounded-lg border border-hairline-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-muted hover:border-brand-border focus:border-brand focus:outline-none"
+                className="mt-5"
                 placeholder="What do you hear? (a wooden comb, a lighter, rain…)"
                 maxLength={200}
                 value={other}
                 onChange={(e) => setOther(e.target.value)}
               />
             )}
-            <p className="mt-4 min-h-5 border-t border-hairline pt-3 text-xs text-ink-muted">
-              {hint ? <><span className="font-medium text-ink">{hint.title ?? hint.key}:</span> {hint.hint}</> : 'Hover a label to see what it covers.'}
+            <p className="mt-5 min-h-5 border-t-2 border-hairline pt-3 text-sm text-ink-muted">
+              {hint ? <><span className="font-bold text-ink">{hint.title ?? hint.key}:</span> {hint.hint}</> : 'Hover a label to see what it covers.'}
             </p>
           </Card>
 
-          <div className="mt-3 flex items-center gap-2">
-            <span className="flex-1" />
-            <Button variant="primary" onClick={submit} disabled={busy || phase !== 'ready'}>
-              Submit <Kbd className="border-white/30 bg-transparent text-white/80 max-sm:hidden">↵</Kbd>
-            </Button>
+          {/* the answer bar, like a lesson's check bar: a cheer after each answer, Submit on the right */}
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t-2 border-hairline bg-surface pb-[env(safe-area-inset-bottom)]">
+            <div className="mx-auto flex h-20 max-w-2xl items-center gap-3 px-4 sm:px-6">
+              <div className="min-w-0 flex-1">
+                {cheer ? (
+                  <div key={cheer.n} className="cheer-in flex items-center gap-3">
+                    <span className="overflow-hidden rounded-xl"><PixelCritter seed={`cheer-${cheer.n}`} size={40} sleepy={false} /></span>
+                    <span className="text-lg font-black text-ok">{cheer.text}</span>
+                  </div>
+                ) : (
+                  <p className="hidden text-xs font-semibold text-ink-muted sm:block">
+                    <Kbd>Space</Kbd> play · <Kbd>R</Kbd> replay · keys on each label · <Kbd>↵</Kbd> submit
+                  </p>
+                )}
+              </div>
+              <Button variant="primary" size="lg" className="min-w-36" onClick={submit} disabled={busy || phase !== 'ready'}>Submit</Button>
+            </div>
           </div>
-          <p className="mt-4 hidden text-xs text-ink-muted sm:block">
-            <Kbd>1</Kbd> to <Kbd>0</Kbd> and the letters on each label toggle it · <Kbd>Space</Kbd> play / pause · <Kbd>R</Kbd> replay · <Kbd>↵</Kbd> submit · <Kbd>Esc</Kbd> clear
-          </p>
         </>
       )}
       {toast && (
-        <div role="status" className="fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-ink px-3.5 py-2 text-sm font-medium text-ink-inverse shadow-lg">
+        <div role="status" className="fixed bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-ink-inverse">
           {toast}
         </div>
       )}
@@ -339,23 +330,28 @@ function TagLabeler({ state, onBeta }: { state: State; onBeta: () => void }) {
           onClosed={() => setIntro(false)}
         />
       )}
-    </>
+    </div>
   )
 }
 
-/** Preferences first (asked once), then the classic labeller or the timeline one (when the gold set is complete, or as
- *  an opt-in beta). */
+/** Preferences first (asked once), then the classic labeller or the timeline one (when the gold set is complete, or for
+ *  someone opted into the beta: /label?beta=1 turns it on for that account, ?beta=0 off; nothing in the UI mentions it). */
 export default function Label() {
   const [state, setState] = useState<State | null>(null)
   const [error, setError] = useState('')
   const load = useCallback(async () => {
+    const flag = new URLSearchParams(window.location.search).get('beta')
+    if (flag === '1' || flag === '0') {
+      await supabase.rpc('set_preferences', { p_beta: flag === '1' })
+      window.history.replaceState(null, '', window.location.pathname)
+    }
     const { data, error } = await supabase.rpc('labelling_state')
     if (error) return setError(error.message)
     setState((data as State[])[0])
   }, [])
   useEffect(() => { load() }, [load])
-  const setBeta = async (on: boolean) => {
-    await supabase.rpc('set_preferences', { p_beta: on })
+  const leaveBeta = async () => {
+    await supabase.rpc('set_preferences', { p_beta: false })
     load()
   }
   if (error) return <AppLayout width="narrow"><EmptyState title="Something went wrong" description={error} action={<Button onClick={load}>Try again</Button>} /></AppLayout>
@@ -366,9 +362,7 @@ export default function Label() {
   }
   return (
     <AppLayout width={state.mode === 'timeline' ? 'default' : 'narrow'}>
-      {state.mode === 'timeline'
-        ? <TimelineLabeler beta={state.beta} onLeaveBeta={() => setBeta(false)} />
-        : <TagLabeler state={state} onBeta={() => setBeta(true)} />}
+      {state.mode === 'timeline' ? <TimelineLabeler beta={state.beta} onLeaveBeta={leaveBeta} /> : <TagLabeler />}
     </AppLayout>
   )
 }

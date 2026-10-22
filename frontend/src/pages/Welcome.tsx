@@ -63,9 +63,9 @@ function WelcomeForm({ uid, profile }: { uid: string; profile: Profile | null })
 
   return (
     <AuthLayout>
-      <form onSubmit={save} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">{linking ? 'Finish your account' : profile ? 'Welcome back' : 'Set up your profile'}</h1>
+      <form onSubmit={save} className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">{linking ? 'Finish your account' : profile ? 'Welcome back' : 'Set up your profile'}</h1>
           <p className="text-sm text-ink-muted">
             {linking
               ? `${stats?.labelled ? `Your ${stats.labelled.toLocaleString()} labelled clips are on this account. ` : ''}Pick a username and a password to join the leaderboard.`

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthLayout } from '../components/Layouts'
-import { Alert, Button, Field, Input, PasswordInput } from '../components/ui'
+import { Alert, Button, Field, Input, PasswordInput, ButtonLink } from '../components/ui'
 import { useAuth } from '../lib/auth'
 import { friendlyError, supabase } from '../lib/supabase'
 
@@ -36,25 +36,25 @@ export default function Signup() {
   if (sent)
     return (
       <AuthLayout>
-        <div className="space-y-3 rounded-xl border border-hairline bg-surface p-6">
-          <h1 className="text-xl font-semibold text-ink">Confirm your email</h1>
+        <div className="space-y-3">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Confirm your email</h1>
           <p className="text-sm text-ink-secondary">We sent a link to <span className="font-medium text-ink">{email.trim()}</span>. Open it to finish creating your account.</p>
         </div>
       </AuthLayout>
     )
 
   return (
-    <AuthLayout>
-      <form onSubmit={submit} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">Create your account</h1>
+    <AuthLayout action={<ButtonLink to="/login" variant="secondary" size="sm">Log in</ButtonLink>}>
+      <form onSubmit={submit} className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Create your account</h1>
           <p className="text-sm text-ink-muted">Labelled with us before? Use the same email and your labels come with you.</p>
         </div>
-        <Field label="Email" htmlFor="email">
-          <Input id="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Field label="Email" htmlFor="email" quiet>
+          <Input id="email" type="email" placeholder="Email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
-        <Field label="Password" htmlFor="password" hint="At least 8 characters.">
-          <PasswordInput id="password" required minLength={8} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Field label="Password" htmlFor="password" quiet>
+          <PasswordInput id="password" placeholder="Password (at least 8 characters)" required minLength={8} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         {error && <Alert>{error}</Alert>}
         <Button type="submit" variant="primary" disabled={busy} className="w-full">{busy ? 'Creating account…' : 'Create account'}</Button>

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../components/Layouts'
-import { Alert, Button, Field, Input, PasswordInput } from '../components/ui'
+import { Alert, Button, Field, Input, PasswordInput, ButtonLink } from '../components/ui'
 import { useAuth } from '../lib/auth'
 import { friendlyError, supabase } from '../lib/supabase'
 
@@ -34,17 +34,17 @@ export default function Login() {
   }
 
   return (
-    <AuthLayout>
-      <form onSubmit={submit} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">Log in</h1>
+    <AuthLayout action={<ButtonLink to="/signup" variant="secondary" size="sm">Sign up</ButtonLink>}>
+      <form onSubmit={submit} className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Log in</h1>
           <p className="text-sm text-ink-muted">Welcome back.</p>
         </div>
-        <Field label="Email" htmlFor="email">
-          <Input id="email" type="email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Field label="Email" htmlFor="email" quiet>
+          <Input id="email" type="email" placeholder="Email" required autoComplete="email" autoCapitalize="none" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
-        <Field label="Password" htmlFor="password">
-          <PasswordInput id="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Field label="Password" htmlFor="password" quiet>
+          <PasswordInput id="password" placeholder="Password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <div className="-mt-2 text-right">
           <Link to="/forgot-password" className="text-xs text-ink-muted transition-colors hover:text-ink">Forgot your password?</Link>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../components/Layouts'
-import { Alert, Button, Loading } from '../components/ui'
+import { Alert, Button, Loading, ButtonLink } from '../components/ui'
 import { useAuth } from '../lib/auth'
 import { friendlyError, supabase } from '../lib/supabase'
 
@@ -39,10 +39,10 @@ export default function Start() {
   }
 
   return (
-    <AuthLayout>
-      <div className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">Start labelling</h1>
+    <AuthLayout action={<ButtonLink to="/login" variant="secondary" size="sm">Log in</ButtonLink>}>
+      <div className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Start labelling</h1>
           <p className="text-sm text-ink-muted">No account needed. Listen to a short clip, tick what you hear, next clip. You can save your progress and join the leaderboard any time.</p>
         </div>
         <label className="flex items-start gap-2.5 text-sm text-ink-secondary">

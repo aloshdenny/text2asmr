@@ -36,8 +36,8 @@ export default function SaveProgress() {
   if (sent)
     return (
       <AuthLayout>
-        <div className="space-y-3 rounded-xl border border-hairline bg-surface p-6">
-          <h1 className="text-xl font-semibold text-ink">Confirm your email</h1>
+        <div className="space-y-3">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Confirm your email</h1>
           <p className="text-sm text-ink-secondary">We sent a link to <span className="font-medium text-ink">{email.trim()}</span>. Open it on this device to pick a username and password. Your labels stay with you.</p>
         </div>
       </AuthLayout>
@@ -46,9 +46,9 @@ export default function SaveProgress() {
   const n = stats?.labelled ?? 0
   return (
     <AuthLayout>
-      <form onSubmit={submit} className="space-y-5 rounded-xl border border-hairline bg-surface p-6">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold text-ink">Save your progress</h1>
+      <form onSubmit={submit} className="space-y-5">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-center text-[26px] font-black tracking-tight text-ink">Save your progress</h1>
           <p className="text-sm text-ink-muted">
             {n > 0 ? `Keep your ${n.toLocaleString()} labelled clips` : 'Keep your labels'}, come back from any device and join the leaderboard. Add your email and we’ll send a link to finish.
           </p>

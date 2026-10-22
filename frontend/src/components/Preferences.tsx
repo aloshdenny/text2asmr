@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { Mascot } from './TopBar'
 import { Alert, Button, cx } from './ui'
 
 /** What a labeller is comfortable labelling. Private: only the owner reads or changes it (set_preferences /
@@ -28,12 +29,12 @@ function Choice<T extends string>({ name, value, options, onChange }: {
           aria-checked={value === v}
           onClick={() => onChange(v)}
           className={cx(
-            'flex min-h-14 flex-col items-center justify-center rounded-xl border px-2 py-2 text-center text-sm transition-colors',
-            value === v ? 'border-brand-border bg-brand-soft font-medium text-brand' : 'border-hairline bg-surface text-ink hover:bg-surface-hover',
+            'press flex min-h-16 flex-col items-center justify-center rounded-2xl border-2 px-2 py-2 text-center text-[15px] font-extrabold [--lift:3px]',
+            value === v ? 'border-brand-border bg-brand-soft text-brand [--edge:var(--brand-border)]' : 'border-hairline bg-surface text-ink [--edge:var(--border)] hover:bg-surface-hover',
           )}
         >
           {label}
-          {sub && <span className={cx('mt-0.5 text-[11px] leading-tight', value === v ? 'text-brand' : 'text-ink-muted')}>{sub}</span>}
+          {sub && <span className={cx('mt-0.5 text-[11px] font-semibold leading-tight', value === v ? 'text-brand' : 'text-ink-muted')}>{sub}</span>}
         </button>
       ))}
     </div>
@@ -63,18 +64,18 @@ export function PreferenceFields({ initial, onSaved, saveLabel = 'Save' }: { ini
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <p className="text-sm font-medium text-ink">Are you more comfortable labelling speech or non-speech sounds?</p>
+        <p className="text-[15px] font-bold text-ink">Are you more comfortable labelling speech or non-speech sounds?</p>
         <Choice name="Sounds" value={p.sound} onChange={(sound) => change({ sound })}
           options={[['speech', 'Speech', 'whispers, talking, moans'], ['nonspeech', 'Non-speech', 'tapping, crinkles, brushing'], ['both', 'Both']]} />
       </div>
       <div className="space-y-2">
-        <p className="text-sm font-medium text-ink">Are you more comfortable labelling SFW, NSFW or both kinds of clips?</p>
+        <p className="text-[15px] font-bold text-ink">Are you more comfortable labelling SFW, NSFW or both kinds of clips?</p>
         <Choice name="Clips" value={p.content} onChange={(content) => change({ content })}
           options={[['sfw', 'SFW'], ['nsfw', 'NSFW'], ['both', 'Both']]} />
       </div>
       {p.content && p.content !== 'sfw' && (
         <div className="space-y-2">
-          <p className="text-sm font-medium text-ink">In NSFW clips, whose voices do you prefer?</p>
+          <p className="text-[15px] font-bold text-ink">In NSFW clips, whose voices do you prefer?</p>
           <Choice name="Voices" value={p.voice} onChange={(voice) => change({ voice })}
             options={[['female', 'Female'], ['male', 'Male'], ['both', 'Both']]} />
         </div>
@@ -93,9 +94,10 @@ export default function PreferencesPrompt({ initial, onSaved }: { initial: Prefs
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="pref-title"
       className="hp-backdrop fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/45 px-4 py-6 backdrop-blur-[3px]">
-      <div className="hp-panel w-full max-w-md rounded-2xl border border-hairline bg-surface-raised p-6 shadow-[0_28px_70px_-24px_rgb(0_0_0/0.6)]">
-        <h2 id="pref-title" className="text-lg font-semibold tracking-tight text-ink">What would you like to label?</h2>
-        <p className="mt-1 mb-5 text-sm text-ink-secondary">We’ll only send you clips you’re comfortable with. You can change this any time in Settings.</p>
+      <div className="hp-panel w-full max-w-md rounded-3xl border-2 border-hairline bg-surface-raised p-6">
+        <div className="mb-3 flex justify-center"><span className="critter-bob overflow-hidden rounded-2xl"><Mascot size={64} /></span></div>
+        <h2 id="pref-title" className="text-center text-2xl font-black tracking-tight text-ink">What would you like to label?</h2>
+        <p className="mt-1 mb-5 text-center text-sm font-semibold text-ink-secondary">We’ll only send you clips you’re comfortable with. You can change this any time in Settings.</p>
         <PreferenceFields initial={initial} onSaved={onSaved} saveLabel="Start labelling" />
       </div>
     </div>

@@ -66,7 +66,6 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
   const [hint, setHint] = useState<Option | null>(null)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
-  const [done, setDone] = useState(0)
   const [follow, setFollow] = useState(false) // a clip was just appended: show it
   const audio = useRef<HTMLAudioElement>(null)
   const track = useRef<HTMLDivElement>(null)
@@ -250,7 +249,6 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
     setBusy(false)
     if (error) return flash(error.message)
     update((e) => ({ ...e, submitted: true }))
-    setDone((d) => d + 1)
     fetchNext()
   }
 
@@ -284,7 +282,7 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
           <div className="absolute inset-x-0 inset-y-1 rounded-lg border border-dashed border-hairline" />
         ) : (
           <div
-            className={cx('absolute inset-y-0.5 flex touch-none select-none items-center rounded-lg border text-xs font-medium',
+            className={cx('absolute inset-y-0.5 flex touch-none select-none items-center rounded-xl border-2 text-xs font-bold',
               active === s.id ? 'z-10 border-brand bg-brand-soft text-brand' : 'border-brand-border bg-brand-soft/70 text-brand')}
             style={{ left: `${(s.start / entry!.duration) * 100}%`, width: `${((s.end - s.start) / entry!.duration) * 100}%` }}
             onPointerDown={(e) => onDown(e, s, 'move')} onPointerMove={onMove} onPointerUp={onUp}
@@ -314,11 +312,12 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
   const pct = entry ? Math.min(100, (at / entry.duration) * 100) : 0
 
   return (
-    <>
-      <div className="mb-4 flex items-center justify-between gap-3 text-sm text-ink-muted">
-        <span><span className="font-medium text-ink tabular-nums">{done}</span> this session · <span className="rounded bg-brand-soft px-1.5 py-0.5 text-xs font-medium text-brand">Timeline beta</span></span>
-        {beta && onLeaveBeta && <button className="text-xs hover:text-ink" onClick={onLeaveBeta}>Back to the classic labeller</button>}
-      </div>
+    <div className="pb-28">
+      {beta && onLeaveBeta && (
+        <div className="mb-3 flex justify-end">
+          <button className="text-xs font-bold text-ink-muted hover:text-ink" onClick={onLeaveBeta}>Classic labeller</button>
+        </div>
+      )}
 
       {phase === 'empty' && <EmptyState title="You’ve heard every clip" description="That’s the whole queue for now." action={<ButtonLink to="/dashboard">Back to your dashboard</ButtonLink>} />}
       {phase === 'error' && <EmptyState title="Something went wrong" description={error} action={<Button onClick={fetchNext}>Try again</Button>} />}
@@ -328,21 +327,21 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
 
       {(phase === 'ready' || phase === 'loading') && entry && (
         <div className="space-y-3">
-          <div className="rounded-2xl border border-hairline bg-surface p-4 sm:p-5">
-            <div className="mb-3 flex items-center justify-between text-xs text-ink-muted">
+          <div className="rounded-2xl border-2 border-hairline bg-surface p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-between text-sm font-bold text-ink-muted">
               <span>{entry.submitted ? 'Your answer · you can still change it' : 'What do you hear, and when?'}</span>
               <span className="font-mono tabular-nums">{fmt(at)} / {fmt(entry.duration)} s</span>
             </div>
             <div className="flex items-center gap-3 sm:gap-4">
               <button onClick={play} disabled={!src} aria-label={playing ? 'Pause' : 'Play'}
-                className={cx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand text-white disabled:opacity-50', playing && 'play-ring')}>
+                className={cx('press flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-brand text-white [--edge:var(--brand-dark)] disabled:opacity-50', playing && 'play-ring')}>
                 {!src ? <Spinner className="text-white" /> : playing
                   ? <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" aria-hidden><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
                   : <svg viewBox="0 0 24 24" className="ml-0.5 h-5 w-5 fill-current" aria-hidden><path d="M8 5.5v13l11-6.5z" /></svg>}
               </button>
               <div className="min-w-0 flex-1 select-none" ref={track}>
                 {[2, 1, 0].map(lane)}
-                <div className="relative my-1 h-14 cursor-pointer rounded-lg bg-surface-muted" onPointerDown={(e) => seek(msAt(e.clientX))} aria-label="Seek">
+                <div className="relative my-1.5 h-16 cursor-pointer rounded-xl bg-surface-muted" onPointerDown={(e) => seek(msAt(e.clientX))} aria-label="Seek">
                   <div className="absolute inset-0 flex items-center gap-px px-1">
                     {(peaks.length ? peaks : Array(BARS).fill(0.06)).map((v, i) => (
                       <div key={i} className={cx('flex-1 rounded-full', (i + 0.5) / BARS * 100 <= pct ? 'bg-brand' : 'bg-ink-muted/35')} style={{ height: `${Math.round(v * 100)}%` }} />
@@ -357,42 +356,45 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
                 {[3, 4, 5].map(lane)}
               </div>
             </div>
-            <p className="mt-3 min-h-5 text-xs text-ink-muted">
+            <p className="mt-3 min-h-5 text-sm text-ink-muted">
               {act ? <><span className="font-medium text-ink">{title(act.label)}</span> <span className="font-mono tabular-nums">{fmt(act.start)} – {fmt(act.end)} s</span> · drag the ends, or use ← → (Shift for 100 ms)</>
                 : hint ? <><span className="font-medium text-ink">{hint.title ?? hint.key}:</span> {hint.hint}</>
                 : 'Pick the sounds below, then drag each one to where it starts and ends.'}
             </p>
           </div>
 
-          <div className="space-y-3 rounded-2xl border border-hairline bg-surface p-4 sm:p-5">
+          <div className="space-y-4 rounded-2xl border-2 border-hairline bg-surface p-4 sm:p-5">
             {GROUPS.map((g) => {
               const opts = menu.filter((o) => o.grp === g && o.key !== 'something else')
               if (!opts.length) return null
               return <Carousel key={g} title={g} options={opts} count={(k) => entry.spans.filter((s) => s.label === k).length} onPick={addSpan} full={entry.spans.length >= 6} />
             })}
-            <label className="flex flex-wrap items-center gap-2 border-t border-hairline pt-3 text-sm text-ink-secondary">
+            <label className="flex flex-wrap items-center gap-3 border-t-2 border-hairline pt-4 text-[15px] font-bold text-ink-secondary">
               <span>Can’t tell?</span>
               <input
-                className="h-9 min-w-0 flex-1 rounded-lg border border-hairline-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-muted focus:border-brand focus:outline-none"
+                className="h-12 min-w-0 flex-1 rounded-2xl border-2 border-hairline bg-surface-muted px-4 text-[15px] font-semibold text-ink placeholder:font-medium placeholder:text-ink-muted focus:border-brand-border focus:bg-surface focus:outline-none"
                 placeholder="What do you hear?" maxLength={200} value={entry.other}
                 onChange={(e) => update((x) => ({ ...x, other: e.target.value }))}
               />
             </label>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={() => go(idx - 1)} disabled={idx === 0 || busy} aria-label="Previous clip">‹ Prev</Button>
-            <Button variant="ghost" onClick={() => go(idx + 1)} disabled={idx >= history.length - 1 || busy} aria-label="Next clip">Next ›</Button>
-            <span className="flex-1" />
-            <Button variant="primary" onClick={submit} disabled={busy || !src}>{entry.submitted ? 'Save changes' : 'Submit'}</Button>
+          {/* the answer bar: prev / next on the left, Submit on the right */}
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t-2 border-hairline bg-surface pb-[env(safe-area-inset-bottom)]">
+            <div className="mx-auto flex h-20 max-w-5xl items-center gap-2 px-4 sm:px-6">
+              <Button variant="secondary" onClick={() => go(idx - 1)} disabled={idx === 0 || busy} aria-label="Previous clip">‹ Prev</Button>
+              <Button variant="secondary" onClick={() => go(idx + 1)} disabled={idx >= history.length - 1 || busy} aria-label="Next clip">Next ›</Button>
+              <span className="flex-1" />
+              <Button variant="primary" size="lg" className="min-w-36" onClick={submit} disabled={busy || !src}>{entry.submitted ? 'Save' : 'Submit'}</Button>
+            </div>
           </div>
         </div>
       )}
 
       {src && <audio ref={audio} src={src} preload="auto" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />}
-      {toast && <div role="status" className="fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-ink px-3.5 py-2 text-sm font-medium text-ink-inverse shadow-lg">{toast}</div>}
+      {toast && <div role="status" className="fixed bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-ink-inverse">{toast}</div>}
       {intro && <HeadphonesPrompt onReady={() => { setStarted(true); audio.current?.play().catch(() => {}) }} onClosed={() => setIntro(false)} />}
-    </>
+    </div>
   )
 }
 
@@ -402,23 +404,23 @@ function Carousel({ title, options, count, onPick, full }: { title: string; opti
   const by = (dir: number) => row.current?.scrollBy({ left: dir * row.current.clientWidth * 0.8, behavior: 'smooth' })
   return (
     <div>
-      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{title}</h3>
+      <h3 className="mb-2 text-xs font-extrabold uppercase tracking-[0.08em] text-ink-muted">{title}</h3>
       <div className="flex items-center gap-1.5">
-        <button type="button" aria-label={`Earlier ${title} labels`} onClick={() => by(-1)} className="h-8 w-7 shrink-0 rounded-lg text-ink-muted hover:bg-surface-hover hover:text-ink">‹</button>
+        <button type="button" aria-label={`Earlier ${title} labels`} onClick={() => by(-1)} className="h-10 w-8 shrink-0 rounded-xl text-lg font-black text-ink-muted hover:bg-surface-hover hover:text-ink">‹</button>
         <div ref={row} className="no-scrollbar flex min-w-0 flex-1 snap-x gap-1.5 overflow-x-auto scroll-smooth">
           {options.map((o) => {
             const n = count(o.key)
             return (
               <button key={o.key} type="button" title={o.hint} disabled={full && n === 0} onClick={() => onPick(o)}
-                className={cx('inline-flex h-8 shrink-0 snap-start items-center gap-1.5 rounded-lg border px-2.5 text-[13px] transition-colors disabled:opacity-40',
-                  n ? 'border-brand-border bg-brand-soft font-medium text-brand' : 'border-hairline bg-surface text-ink hover:bg-surface-hover')}>
+                className={cx('press mb-1 inline-flex h-10 shrink-0 snap-start items-center gap-1.5 rounded-2xl border-2 px-3 text-sm font-bold [--lift:3px] disabled:opacity-40',
+                  n ? 'border-brand-border bg-brand-soft text-brand [--edge:var(--brand-border)]' : 'border-hairline bg-surface text-ink [--edge:var(--border)] hover:bg-surface-hover')}>
                 {o.title ?? o.key}
                 {n > 1 && <span className="font-mono text-[11px]">×{n}</span>}
               </button>
             )
           })}
         </div>
-        <button type="button" aria-label={`More ${title} labels`} onClick={() => by(1)} className="h-8 w-7 shrink-0 rounded-lg text-ink-muted hover:bg-surface-hover hover:text-ink">›</button>
+        <button type="button" aria-label={`More ${title} labels`} onClick={() => by(1)} className="h-10 w-8 shrink-0 rounded-xl text-lg font-black text-ink-muted hover:bg-surface-hover hover:text-ink">›</button>
       </div>
     </div>
   )

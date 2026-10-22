@@ -1,6 +1,7 @@
-import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useState, type ButtonHTMLAttributes, type ComponentProps, type InputHTMLAttributes, type ReactNode } from 'react'
 import { Link, type LinkProps } from 'react-router-dom'
 import { toggleTheme } from '../lib/theme'
+import PixelCritter from './PixelCritter'
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
@@ -9,14 +10,14 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 /* ------------------------------------------------------------------ card -- */
 
 export function Card({ children, className, padded = true }: { children: ReactNode; className?: string; padded?: boolean }) {
-  return <section className={cx('rounded-xl border border-hairline bg-surface', padded && 'p-5', className)}>{children}</section>
+  return <section className={cx('rounded-2xl border-2 border-hairline bg-surface', padded && 'p-5', className)}>{children}</section>
 }
 
 export function CardHeader({ title, description, action }: { title: ReactNode; description?: ReactNode; action?: ReactNode }) {
   return (
     <div className="mb-4 flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+        <h2 className="text-base font-extrabold text-ink">{title}</h2>
         {description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}
       </div>
       {action}
@@ -29,20 +30,21 @@ export function CardHeader({ title, description, action }: { title: ReactNode; d
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 type Size = 'sm' | 'md' | 'lg'
 
+// chunky buttons: primary / secondary / danger sit on a darker edge (.press in index.css) and sink onto it when pressed
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-brand text-white hover:bg-brand-dark border border-transparent',
-  secondary: 'bg-surface text-ink border border-hairline-strong hover:bg-surface-hover',
-  ghost: 'bg-transparent text-ink-secondary border border-transparent hover:bg-surface-hover hover:text-ink',
-  danger: 'bg-surface text-danger border border-danger-border hover:bg-danger-bg',
+  primary: 'press bg-brand text-white [--edge:var(--brand-dark)] hover:brightness-[1.06]',
+  secondary: 'press border-2 border-hairline bg-surface text-brand [--edge:var(--border)] hover:bg-surface-hover',
+  ghost: 'bg-transparent text-ink-secondary hover:bg-surface-hover hover:text-ink',
+  danger: 'press border-2 border-danger-border bg-surface text-danger [--edge:var(--danger-border)] hover:bg-danger-bg',
 }
 const SIZES: Record<Size, string> = {
-  sm: 'h-8 px-2.5 text-xs gap-1.5',
-  md: 'h-9 px-3.5 text-sm gap-2',
-  lg: 'h-11 px-5 text-[15px] gap-2',
+  sm: 'h-9 px-3.5 text-xs gap-1.5 [--lift:3px]',
+  md: 'h-11 px-5 text-[13px] gap-2',
+  lg: 'h-12 px-6 text-sm gap-2',
 }
 const buttonClass = (variant: Variant, size: Size, className?: string) =>
   cx(
-    'inline-flex items-center justify-center whitespace-nowrap rounded-lg font-medium transition-colors',
+    'inline-flex select-none items-center justify-center whitespace-nowrap rounded-2xl font-extrabold uppercase tracking-[0.06em]',
     'disabled:cursor-not-allowed disabled:opacity-50',
     VARIANTS[variant],
     SIZES[size],
@@ -65,18 +67,19 @@ export function ButtonLink({ variant = 'secondary', size = 'md', className, ...r
 /* ----------------------------------------------------------------- input -- */
 
 const FIELD =
-  'w-full rounded-lg border border-hairline-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-muted ' +
-  'transition-colors hover:border-brand-border focus:border-brand focus:outline-none ' +
-  'disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-muted'
+  'w-full rounded-2xl border-2 border-hairline bg-surface-muted px-4 text-[15px] font-semibold text-ink placeholder:font-medium placeholder:text-ink-muted ' +
+  'transition-colors focus:border-brand-border focus:bg-surface focus:outline-none ' +
+  'disabled:cursor-not-allowed disabled:text-ink-muted'
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cx(FIELD, 'h-9', className)} {...rest} />
+export function Input({ className, ...rest }: ComponentProps<'input'>) {
+  return <input className={cx(FIELD, 'h-12', className)} {...rest} />
 }
 
-export function Field({ label, hint, htmlFor, children }: { label: ReactNode; hint?: ReactNode; htmlFor?: string; children: ReactNode }) {
+/** A labelled field. `quiet` keeps the label for screen readers only (the input's placeholder says what it is). */
+export function Field({ label, hint, htmlFor, quiet = false, children }: { label: ReactNode; hint?: ReactNode; htmlFor?: string; quiet?: boolean; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-ink">{label}</label>
+      <label htmlFor={htmlFor} className={quiet ? 'sr-only' : 'block text-sm font-bold text-ink-secondary'}>{label}</label>
       {children}
       {hint && <p className="text-xs text-ink-muted">{hint}</p>}
     </div>
@@ -95,7 +98,7 @@ export function PasswordInput({ className, ...rest }: Omit<InputHTMLAttributes<H
         tabIndex={-1}
         aria-label={visible ? 'Hide password' : 'Show password'}
         title={visible ? 'Hide password' : 'Show password'}
-        className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-r-lg text-ink-muted transition-colors hover:text-ink"
+        className="absolute right-1 top-0 flex h-12 w-11 items-center justify-center rounded-r-2xl text-ink-muted transition-colors hover:text-ink"
       >
         <Icon>
           {visible ? (
@@ -130,7 +133,7 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
   return (
     <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold tracking-tight text-ink">{title}</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight text-ink">{title}</h1>
         {description && <p className="mt-1 text-sm text-ink-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
@@ -143,7 +146,7 @@ export function Alert({ tone = 'danger', children }: { tone?: 'danger' | 'brand'
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
       className={cx(
-        'rounded-lg border px-3 py-2 text-sm',
+        'rounded-2xl border-2 px-4 py-3 text-sm font-semibold',
         tone === 'danger' ? 'border-danger-border bg-danger-bg text-danger' : 'border-brand-border bg-brand-soft text-ink',
       )}
     >
@@ -154,8 +157,9 @@ export function Alert({ tone = 'danger', children }: { tone?: 'danger' | 'brand'
 
 export function EmptyState({ title, description, action }: { title: ReactNode; description?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-hairline-strong bg-surface-muted px-6 py-10 text-center">
-      <p className="text-sm font-medium text-ink">{title}</p>
+    <div className="rounded-2xl border-2 border-dashed border-hairline-strong bg-surface-muted px-6 py-10 text-center">
+      <div className="mx-auto mb-3 w-16"><PixelCritter seed="sleepy-empty" size={64} sleepy /></div>
+      <p className="text-base font-extrabold text-ink">{title}</p>
       {description && <p className="mx-auto mt-1 max-w-sm text-sm text-ink-muted">{description}</p>}
       {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
@@ -176,7 +180,7 @@ export function Loading() {
 
 export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <kbd className={cx('inline-flex h-5 min-w-5 items-center justify-center rounded border border-hairline bg-surface-muted px-1 font-mono text-[11px] font-medium text-ink-muted', className)}>
+    <kbd className={cx('inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-hairline-strong bg-surface px-1 font-mono text-[11px] font-bold normal-case tracking-normal text-ink-muted', className)}>
       {children}
     </kbd>
   )
@@ -190,7 +194,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={toggleTheme}
       title="Toggle light and dark theme"
       aria-label="Toggle light and dark theme"
-      className={cx('rounded-md p-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink', className)}
+      className={cx('rounded-xl p-2 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink', className)}
     >
       <Icon>
         <path className="theme-when-light" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
@@ -205,9 +209,9 @@ export function ThemeToggle({ className }: { className?: string }) {
 
 export function Stat({ value, label }: { value: ReactNode; label: ReactNode }) {
   return (
-    <div className="rounded-xl border border-hairline bg-surface px-4 py-3.5">
-      <div className="text-2xl font-semibold tracking-tight text-ink tabular-nums">{value}</div>
-      <div className="mt-0.5 text-xs text-ink-muted">{label}</div>
+    <div className="rounded-2xl border-2 border-hairline bg-surface px-4 py-3.5">
+      <div className="text-2xl font-extrabold tracking-tight text-ink tabular-nums">{value}</div>
+      <div className="mt-0.5 text-xs font-semibold text-ink-muted">{label}</div>
     </div>
   )
 }
