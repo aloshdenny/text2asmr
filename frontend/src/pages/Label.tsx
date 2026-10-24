@@ -276,7 +276,7 @@ function TagLabeler() {
 
           {/* the answer bar, like a lesson's check bar: a cheer after each answer, Submit on the right */}
           <div className="fixed inset-x-0 bottom-0 z-20 border-t-2 border-hairline bg-surface pb-[env(safe-area-inset-bottom)]">
-            <div className="mx-auto flex h-20 max-w-2xl items-center gap-3 px-4 sm:px-6">
+            <div className="mx-auto flex h-20 max-w-5xl items-center gap-3 px-4 sm:px-6">
               <div className="min-w-0 flex-1">
                 {cheer ? (
                   <div key={cheer.n} className="cheer-in flex items-center gap-3">
@@ -341,7 +341,7 @@ export default function Label() {
     return <AppLayout width="narrow"><PreferencesPrompt initial={prefs} onSaved={() => load()} /></AppLayout>
   }
   return (
-    <AppLayout width={state.mode === 'timeline' ? 'default' : 'narrow'}>
+    <AppLayout>
       {state.mode === 'timeline' ? <TimelineLabeler beta={state.beta} onLeaveBeta={leaveBeta} /> : <TagLabeler />}
     </AppLayout>
   )
