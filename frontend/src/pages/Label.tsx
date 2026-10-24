@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
+import Carousel from '../components/Carousel'
 import HeadphonesPrompt, { headphonesSeen } from '../components/HeadphonesPrompt'
 import Interlude, { type InterludeKind } from '../components/Interlude'
 import { AppLayout } from '../components/Layouts'
@@ -253,33 +254,9 @@ function TagLabeler() {
 
           <Card className="mt-3">
             <p className="mb-4 text-[15px] font-semibold text-ink-secondary">Tick everything you can hear. Most clips have more than one sound.</p>
-            <div className="space-y-5">
-              {groups.map(([g, opts]) => (
-                <div key={g}>
-                  <h3 className="mb-2.5 text-xs font-extrabold uppercase tracking-[0.08em] text-ink-muted">{g}</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {opts.map((o) => {
-                      const on = picked.has(o.key)
-                      return (
-                        <button
-                          key={o.key}
-                          aria-pressed={on}
-                          title={o.hint}
-                          onMouseEnter={() => setHint(o)}
-                          onFocus={() => setHint(o)}
-                          onClick={() => toggle(o.key)}
-                          className={cx(
-                            'press inline-flex h-11 items-center gap-2 rounded-2xl border-2 px-3 text-[15px] font-bold [--lift:3px]',
-                            on ? 'pop border-brand-border bg-brand-soft text-brand [--edge:var(--brand-border)]' : 'border-hairline bg-surface text-ink [--edge:var(--border)] hover:bg-surface-hover',
-                          )}
-                        >
-                          <Kbd className={cx('max-sm:hidden', on && 'border-brand-border bg-transparent text-brand')}>{keyOf(o)}</Kbd>
-                          {o.title ?? o.key}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
+            <div className="space-y-4">
+              {groups.map(([g, opts]) => opts.length > 0 && (
+                <Carousel key={g} title={g} options={opts} count={(k) => (picked.has(k) ? 1 : 0)} onPick={(o) => toggle(o.key)} keyOf={keyOf} onHint={setHint} />
               ))}
             </div>
             {picked.has('something else') && (

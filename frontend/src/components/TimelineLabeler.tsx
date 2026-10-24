@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import HeadphonesPrompt, { headphonesSeen } from './HeadphonesPrompt'
 import Interlude, { type InterludeKind } from './Interlude'
+import Carousel from './Carousel'
 import { Button, ButtonLink, EmptyState, Spinner, cx } from './ui'
 import { loadMenu, supabase, type Option } from '../lib/supabase'
 
@@ -394,34 +395,6 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
       {src && <audio ref={audio} src={src} preload="auto" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />}
       {toast && <div role="status" className="fixed bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-ink-inverse">{toast}</div>}
       {intro && <HeadphonesPrompt onReady={() => { setStarted(true); audio.current?.play().catch(() => {}) }} onClosed={() => setIntro(false)} />}
-    </div>
-  )
-}
-
-/** One category's labels in a row that scrolls sideways, with arrows. */
-function Carousel({ title, options, count, onPick, full }: { title: string; options: Option[]; count: (k: string) => number; onPick: (o: Option) => void; full: boolean }) {
-  const row = useRef<HTMLDivElement>(null)
-  const by = (dir: number) => row.current?.scrollBy({ left: dir * row.current.clientWidth * 0.8, behavior: 'smooth' })
-  return (
-    <div>
-      <h3 className="mb-2 text-xs font-extrabold uppercase tracking-[0.08em] text-ink-muted">{title}</h3>
-      <div className="flex items-center gap-1.5">
-        <button type="button" aria-label={`Earlier ${title} labels`} onClick={() => by(-1)} className="h-10 w-8 shrink-0 rounded-xl text-lg font-black text-ink-muted hover:bg-surface-hover hover:text-ink">‹</button>
-        <div ref={row} className="no-scrollbar flex min-w-0 flex-1 snap-x gap-1.5 overflow-x-auto scroll-smooth">
-          {options.map((o) => {
-            const n = count(o.key)
-            return (
-              <button key={o.key} type="button" title={o.hint} disabled={full && n === 0} onClick={() => onPick(o)}
-                className={cx('press mb-1 inline-flex h-10 shrink-0 snap-start items-center gap-1.5 rounded-2xl border-2 px-3 text-sm font-bold [--lift:3px] disabled:opacity-40',
-                  n ? 'border-brand-border bg-brand-soft text-brand [--edge:var(--brand-border)]' : 'border-hairline bg-surface text-ink [--edge:var(--border)] hover:bg-surface-hover')}>
-                {o.title ?? o.key}
-                {n > 1 && <span className="font-mono text-[11px]">×{n}</span>}
-              </button>
-            )
-          })}
-        </div>
-        <button type="button" aria-label={`More ${title} labels`} onClick={() => by(1)} className="h-10 w-8 shrink-0 rounded-xl text-lg font-black text-ink-muted hover:bg-surface-hover hover:text-ink">›</button>
-      </div>
     </div>
   )
 }
