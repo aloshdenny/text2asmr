@@ -56,20 +56,20 @@ select throws_ok('select * from private.clip_sources', '42501', null, 'labellers
 select throws_ok('select public.admin_export_labels()', '42501', null, 'labellers cannot export labels');
 select ok(private.can_hear('t1.mp3'), 'storage lets alice hear her assigned clip');
 select ok(not private.can_hear('t2.mp3'), '... and not a clip she was not given');
-select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 4000)$$,
-                 '22023', 'listen to the clip first', 'answers within 2 s of assignment are refused');
+select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 7000)$$,
+                 '22023', 'listen to the whole clip first', 'answers before the clip could have played are refused');
 reset role;
 update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000a", "role": "authenticated"}';
 select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 500)$$,
-                 '22023', 'listen to the clip first', 'answers without 1.5 s of playback are refused');
-select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['banjo'], null, false, 4000)$$,
+                 '22023', 'listen to the whole clip first', 'answers without the whole clip played are refused');
+select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['banjo'], null, false, 7000)$$,
                  '22023', 'unknown label', 'labels must come from the menu');
-select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array[]::text[], null, false, 4000)$$,
+select throws_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array[]::text[], null, false, 7000)$$,
                  '22023', null, 'an empty answer needs "can''t tell"');
 select is((select total from public.submit_label((select clip_id from public.next_clip()),
-                                                  array['tapping', 'whispering', 'tapping', 'something else'], '  wooden comb  ', false, 4000)),
+                                                  array['tapping', 'whispering', 'tapping', 'something else'], '  wooden comb  ', false, 7000)),
           1::bigint, 'alice''s first label counts');
 select is((select labels from public.labels), array['something else', 'tapping', 'whispering'], 'labels are de-duplicated and sorted');
 select is((select other_text from public.labels), 'wooden comb', 'free text kept (trimmed) with "something else"');
@@ -82,7 +82,7 @@ reset role;
 update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000b", "role": "authenticated"}';
-select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array[]::text[], null, true, 3000)$$,
+select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array[]::text[], null, true, 7000)$$,
                 'bob can say he cannot tell');
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
 select is((select audio_path from public.next_clip()), 't2.mp3', 'cara gets the other clip once clip 1 has its two answers');
@@ -95,7 +95,7 @@ select ok((select need from public.clips where audio_path = 't1.mp3') between 0.
 update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
-select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping', 'whispering'], null, false, 3000)$$,
+select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping', 'whispering'], null, false, 7000)$$,
                 'a third judge answers');
 reset role;
 select is((select round(agreement::numeric, 2) from public.clips where audio_path = 't1.mp3'), 0.67, 'agreement is the mean Jaccard of the answers');
@@ -175,7 +175,7 @@ reset role;
 update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-00000000000c", "role": "authenticated"}';
-select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 3000)$$, 'the retest is answered');
+select lives_ok($$select * from public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 7000)$$, 'the retest is answered');
 reset role;
 select is((select votes from public.clips where audio_path = 't1.mp3'), 3::smallint, 'a retest does not count toward the quorum');
 select is((select count(*) from public.labels l join public.profiles p on p.id = l.user_id where p.username = 'cara' and l.attempt = 2), 1::bigint,

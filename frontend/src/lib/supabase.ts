@@ -22,6 +22,20 @@ function deviceId(): string | null {
 const device = deviceId()
 export const supabase = createClient(API, 'public', device ? { global: { headers: { 'x-ab-device-id': device } } } : undefined)
 
+/** How much of a clip has actually played, in ms (seeking past a part does not count it). */
+export function playedMs(a: HTMLAudioElement): number {
+  let t = 0
+  for (let i = 0; i < a.played.length; i++) t += a.played.end(i) - a.played.start(i)
+  return Math.round(t * 1000)
+}
+
+/** The whole clip has played once (within 0.3 s, for encoder padding); the database checks the same, a little looser.
+ *  Uses the clip's stored length when the browser cannot tell how long the audio is. */
+export function wholeClipPlayed(a: HTMLAudioElement, fallbackS: number): boolean {
+  const d = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : fallbackS
+  return d > 0 && playedMs(a) >= d * 1000 - 300
+}
+
 /** An avatar is an https URL or an object in the public "avatars" bucket. */
 export const avatarSrc = (url?: string | null) =>
   !url ? null : url.startsWith('avatars/') ? `${API}/storage/v1/object/public/${url}` : url

@@ -30,7 +30,7 @@ insert into public.assignments (user_id, clip_id, assigned_at)
 select '00000000-0000-0000-0000-0000000000f1', id, now() - interval '10 seconds' from public.clips where audio_path = 's-dull.mp3';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000f1", "role": "authenticated"}';
-select lives_ok($$select * from public.submit_label((select id from ids where audio_path = 's-dull.mp3'), array['tapping'], null, false, 4000)$$,
+select lives_ok($$select * from public.submit_label((select id from ids where audio_path = 's-dull.mp3'), array['tapping'], null, false, 7000)$$,
                 'gale answers the dull clip');
 
 -- hugo gets the clip gale started, though the untouched one is needier

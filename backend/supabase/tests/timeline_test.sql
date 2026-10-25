@@ -111,18 +111,18 @@ update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "a4400000-0000-0000-0000-000000000000", "role": "authenticated"}';
 select throws_ok($$select * from public.submit_spans((select clip_id from public.next_clip()),
-  '[{"label": "moaning", "start_ms": 100, "end_ms": 9000, "lane": 0}]'::jsonb, null, 4000)$$, '22023', null, 'a sound must end inside the clip');
+  '[{"label": "moaning", "start_ms": 100, "end_ms": 9000, "lane": 0}]'::jsonb, null, 7000)$$, '22023', null, 'a sound must end inside the clip');
 select throws_ok($$select * from public.submit_spans((select clip_id from public.next_clip()),
-  '[{"label": "moaning", "start_ms": 0, "end_ms": 900, "lane": 0}, {"label": "tapping", "start_ms": 0, "end_ms": 900, "lane": 0}]'::jsonb, null, 4000)$$,
+  '[{"label": "moaning", "start_ms": 0, "end_ms": 900, "lane": 0}, {"label": "tapping", "start_ms": 0, "end_ms": 900, "lane": 0}]'::jsonb, null, 7000)$$,
   '22023', null, 'one sound per lane');
 select throws_ok($$select * from public.submit_spans((select clip_id from public.next_clip()),
-  (select jsonb_agg(jsonb_build_object('label', 'moaning', 'start_ms', 0, 'end_ms', 500, 'lane', i)) from generate_series(0, 6) i), null, 4000)$$,
+  (select jsonb_agg(jsonb_build_object('label', 'moaning', 'start_ms', 0, 'end_ms', 500, 'lane', i)) from generate_series(0, 6) i), null, 7000)$$,
   '22023', 'up to 6 sounds per clip', 'up to 6 sounds');
-select throws_ok($$select * from public.submit_spans((select clip_id from public.next_clip()), '[]'::jsonb, '  ', 4000)$$,
+select throws_ok($$select * from public.submit_spans((select clip_id from public.next_clip()), '[]'::jsonb, '  ', 7000)$$,
   '22023', null, 'an empty answer is refused');
 select is((select total from public.submit_spans((select clip_id from public.next_clip()),
   '[{"label": "normal speech", "start_ms": 0, "end_ms": 2500, "lane": 3}, {"label": "sex slapping", "start_ms": 1200, "end_ms": 5000, "lane": 4},
-    {"label": "moaning", "start_ms": 2900, "end_ms": 6000, "lane": 0}]'::jsonb, 'a creaky chair', 4000)), 1::bigint, 'a timeline answer is saved');
+    {"label": "moaning", "start_ms": 2900, "end_ms": 6000, "lane": 0}]'::jsonb, 'a creaky chair', 7000)), 1::bigint, 'a timeline answer is saved');
 select is((select labels from public.labels where user_id = 'a4400000-0000-0000-0000-000000000000'),
           array['moaning', 'normal speech', 'sex slapping', 'something else'], 'its labels are the sounds marked, plus the free text');
 select is((select jsonb_array_length(spans) from public.labels where user_id = 'a4400000-0000-0000-0000-000000000000'), 3,

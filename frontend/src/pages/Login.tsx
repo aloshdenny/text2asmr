@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../components/Layouts'
 import { Alert, Button, Field, Input, PasswordInput, ButtonLink } from '../components/ui'
-import { useAuth } from '../lib/auth'
+import { deviceRefusal, useAuth } from '../lib/auth'
 import { friendlyError, supabase } from '../lib/supabase'
 
 export default function Login() {
@@ -10,7 +10,13 @@ export default function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(() => {
+    try { // why this browser was just signed out, if it was (see AuthProvider)
+      const why = sessionStorage.getItem('asmrboard:signed-out') ?? ''
+      sessionStorage.removeItem('asmrboard:signed-out')
+      return why
+    } catch { return '' }
+  })
   const [unclaimed, setUnclaimed] = useState(false)
   const [busy, setBusy] = useState(false)
   if (!loading && session && !session.user.is_anonymous) return <Navigate to="/dashboard" replace />
@@ -28,6 +34,13 @@ export default function Login() {
       setBusy(false)
       if (status === 'unclaimed') return setUnclaimed(true)
       return setError(error.message === 'Invalid login credentials' ? 'Wrong email or password.' : friendlyError(error.message))
+    }
+    const { error: dev } = await supabase.rpc('claim_device')
+    const why = deviceRefusal(dev?.code)
+    if (why) {
+      await supabase.auth.signOut({ scope: 'local' })
+      setBusy(false)
+      return setError(why)
     }
     setBusy(false)
     navigate('/dashboard')

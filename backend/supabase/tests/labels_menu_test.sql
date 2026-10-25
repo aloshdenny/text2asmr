@@ -34,7 +34,7 @@ update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-0000-0000-0000000000e1", "role": "authenticated"}';
 select is((select total from public.submit_label((select clip_id from public.next_clip()),
-                                                  array['squirting', 'sex slapping', 'clapping', 'moaning'], null, false, 4000)),
+                                                  array['squirting', 'sex slapping', 'clapping', 'moaning'], null, false, 7000)),
           1::bigint, 'new labels are accepted');
 select is((select labels from public.labels where user_id = '00000000-0000-0000-0000-0000000000e1'),
           array['clapping', 'moaning', 'sex slapping', 'squirting'], 'and stored by key');

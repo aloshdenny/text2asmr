@@ -32,7 +32,7 @@ reset role;
 update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "d2000000-0000-0000-0000-000000000000", "role": "authenticated", "is_anonymous": true}';
-select public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 4000);
+select public.submit_label((select clip_id from public.next_clip()), array['tapping'], null, false, 7000);
 reset role;
 select is((select hits from private.user_marks where user_id = 'd2000000-0000-0000-0000-000000000000' and kind = 'device'), 2,
           'each answer counts another sighting');
@@ -45,7 +45,7 @@ reset role;
 update public.assignments set assigned_at = now() - interval '10 seconds';
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "d1000000-0000-0000-0000-000000000000", "role": "authenticated", "is_anonymous": true}';
-select public.submit_label((select clip_id from public.next_clip()), array['crinkling'], null, false, 4000);
+select public.submit_label((select clip_id from public.next_clip()), array['crinkling'], null, false, 7000);
 reset role;
 
 -- a member on another device in the same network; junk headers are ignored

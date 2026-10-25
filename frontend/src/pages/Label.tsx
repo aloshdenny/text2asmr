@@ -8,7 +8,7 @@ import TimelineLabeler from '../components/TimelineLabeler'
 import PixelCritter from '../components/PixelCritter'
 import { Button, ButtonLink, Card, EmptyState, Icon, Input, Kbd, Loading, Spinner, cx } from '../components/ui'
 import { useAuth } from '../lib/auth'
-import { KEYS, loadMenu, supabase, type Option } from '../lib/supabase'
+import { KEYS, loadMenu, playedMs, supabase, wholeClipPlayed, type Option } from '../lib/supabase'
 
 type Clip = { clip_id: string; audio_path: string; duration_s: number }
 type Phase = 'loading' | 'ready' | 'interlude' | 'empty' | 'error'
@@ -28,6 +28,7 @@ function TagLabeler() {
   const [started, setStarted] = useState(headphonesSeen) // browsers only play sound after a click: the first clip waits for one
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState({ at: 0, dur: 0 })
+  const [heard, setHeard] = useState(false) // the whole clip has played once: only then can it be answered
   const [hint, setHint] = useState<Option | null>(null)
   const [cheer, setCheer] = useState<{ n: number; text: string } | null>(null) // a quick "nice!" after each answer
   const [busy, setBusy] = useState(false)
@@ -48,6 +49,7 @@ function TagLabeler() {
     setPicked(new Set())
     setOther('')
     setTime({ at: 0, dur: 0 })
+    setHeard(false)
     // every 8-17 labels the server has a quick break (Real or AI / Which is hotter) instead; the clip stays assigned
     const [due, clipRes] = await Promise.all([supabase.rpc('next_interlude'), supabase.rpc('next_clip')])
     const it = (due.data as Due[] | null)?.[0]
@@ -90,13 +92,8 @@ function TagLabeler() {
     if (src && started) audio.current?.play().catch(() => setPlaying(false))
   }, [src, started])
 
-  const listenedMs = () => {
-    const a = audio.current
-    if (!a) return 0
-    let t = 0
-    for (let i = 0; i < a.played.length; i++) t += a.played.end(i) - a.played.start(i)
-    return Math.round(t * 1000)
-  }
+  const listenedMs = () => (audio.current ? playedMs(audio.current) : 0)
+  const checkHeard = (a: HTMLAudioElement) => { if (wholeClipPlayed(a, clip?.duration_s ?? 0)) setHeard(true) }
 
   const toggle = (key: string) => {
     setPicked((p) => {
@@ -125,7 +122,7 @@ function TagLabeler() {
   const submit = async () => {
     if (!clip || busy || phase !== 'ready') return
     if (picked.size === 0) return flash('Pick at least one label. Not sure? Tick “something else” and say what you hear.')
-    if (listenedMs() < 1500) return flash('Listen to the clip first.')
+    if (!heard) return flash('Listen to the whole clip first.')
     setBusy(true)
     const { error } = await supabase.rpc('submit_label', {
       p_clip: clip.clip_id,
@@ -245,8 +242,8 @@ function TagLabeler() {
                 preload="auto"
                 onPlay={() => setPlaying(true)}
                 onPause={() => setPlaying(false)}
-                onEnded={() => setPlaying(false)}
-                onTimeUpdate={(e) => setTime({ at: e.currentTarget.currentTime, dur: e.currentTarget.duration || 0 })}
+                onEnded={(e) => { setPlaying(false); checkHeard(e.currentTarget) }}
+                onTimeUpdate={(e) => { setTime({ at: e.currentTarget.currentTime, dur: e.currentTarget.duration || 0 }); checkHeard(e.currentTarget) }}
                 onLoadedMetadata={(e) => setTime({ at: 0, dur: e.currentTarget.duration || 0 })}
               />
             )}
@@ -283,13 +280,15 @@ function TagLabeler() {
                     <span className="overflow-hidden rounded-xl"><PixelCritter seed={`cheer-${cheer.n}`} size={40} sleepy={false} /></span>
                     <span className="text-lg font-black text-ok">{cheer.text}</span>
                   </div>
+                ) : !heard && phase === 'ready' ? (
+                  <p className="text-sm font-bold text-ink-muted">Listen to the whole clip to answer</p>
                 ) : (
                   <p className="hidden text-xs font-semibold text-ink-muted sm:block">
                     <Kbd>Space</Kbd> play · <Kbd>R</Kbd> replay · keys on each label · <Kbd>↵</Kbd> submit
                   </p>
                 )}
               </div>
-              <Button variant="primary" size="lg" className="min-w-36" onClick={submit} disabled={busy || phase !== 'ready'}>Submit</Button>
+              <Button variant="primary" size="lg" className="min-w-36" onClick={submit} disabled={busy || phase !== 'ready' || !heard}>Submit</Button>
             </div>
           </div>
         </>

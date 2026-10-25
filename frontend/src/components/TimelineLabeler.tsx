@@ -3,7 +3,7 @@ import HeadphonesPrompt, { headphonesSeen } from './HeadphonesPrompt'
 import Interlude, { type InterludeKind } from './Interlude'
 import Carousel from './Carousel'
 import { Button, ButtonLink, EmptyState, Spinner, cx } from './ui'
-import { loadMenu, supabase, type Option } from '../lib/supabase'
+import { loadMenu, playedMs, supabase, wholeClipPlayed, type Option } from '../lib/supabase'
 
 /* The timeline labeller (beta): every sound in a clip is a span with a start and an end in milliseconds, dragged on
    the clip's waveform like a clip on a video editor's timeline. Up to six sounds: lanes 0-2 above the waveform
@@ -63,6 +63,7 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
   const [started, setStarted] = useState(headphonesSeen)
   const [playing, setPlaying] = useState(false)
   const [at, setAt] = useState(0)
+  const [heard, setHeard] = useState(false) // the whole clip has played once (needed for a new answer, not an edit)
   const [active, setActive] = useState<string | null>(null)
   const [hint, setHint] = useState<Option | null>(null)
   const [busy, setBusy] = useState(false)
@@ -173,13 +174,9 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
     if (a) a.currentTime = ms / 1000
     setAt(ms)
   }
-  const listenedMs = () => {
-    const a = audio.current
-    if (!a) return 0
-    let t = 0
-    for (let i = 0; i < a.played.length; i++) t += a.played.end(i) - a.played.start(i)
-    return Math.round(t * 1000)
-  }
+  const listenedMs = () => (audio.current ? playedMs(audio.current) : 0)
+  useEffect(() => setHeard(false), [src])
+  const checkHeard = (a: HTMLAudioElement) => { if (wholeClipPlayed(a, (entry?.duration ?? 0) / 1000)) setHeard(true) }
 
   // spans
   const addSpan = (o: Option) => {
@@ -243,7 +240,7 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
       setBusy(false)
       return flash(error ? error.message : 'Saved your changes.')
     }
-    if (listenedMs() < 1500) return flash('Listen to the clip first.')
+    if (!heard) return flash('Listen to the whole clip first.')
     setBusy(true)
     audio.current?.pause()
     const { error } = await supabase.rpc('submit_spans', { p_clip: entry.clip_id, p_spans: spans, p_other: entry.other.trim() || null, p_listen_ms: listenedMs() })
@@ -385,14 +382,14 @@ export default function TimelineLabeler({ onLeaveBeta, beta }: { onLeaveBeta?: (
             <div className="mx-auto flex h-20 max-w-5xl items-center gap-2 px-4 sm:px-6">
               <Button variant="secondary" onClick={() => go(idx - 1)} disabled={idx === 0 || busy} aria-label="Previous clip">‹ Prev</Button>
               <Button variant="secondary" onClick={() => go(idx + 1)} disabled={idx >= history.length - 1 || busy} aria-label="Next clip">Next ›</Button>
-              <span className="flex-1" />
-              <Button variant="primary" size="lg" className="min-w-36" onClick={submit} disabled={busy || !src}>{entry.submitted ? 'Save' : 'Submit'}</Button>
+              <span className="flex-1 text-right text-sm font-bold text-ink-muted max-sm:hidden">{!entry.submitted && !heard ? 'Listen to the whole clip to answer' : ''}</span>
+              <Button variant="primary" size="lg" className="min-w-36" onClick={submit} disabled={busy || !src || (!entry.submitted && !heard)}>{entry.submitted ? 'Save' : 'Submit'}</Button>
             </div>
           </div>
         </div>
       )}
 
-      {src && <audio ref={audio} src={src} preload="auto" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />}
+      {src && <audio ref={audio} src={src} preload="auto" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={(e) => { setPlaying(false); checkHeard(e.currentTarget) }} onTimeUpdate={(e) => checkHeard(e.currentTarget)} />}
       {toast && <div role="status" className="fixed bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-2xl bg-ink px-4 py-2.5 text-sm font-bold text-ink-inverse">{toast}</div>}
       {intro && <HeadphonesPrompt onReady={() => { setStarted(true); audio.current?.play().catch(() => {}) }} onClosed={() => setIntro(false)} />}
     </div>

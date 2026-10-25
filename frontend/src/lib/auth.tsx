@@ -3,6 +3,14 @@ import type { Session } from '@supabase/supabase-js'
 import { clearReferral, pendingReferral } from './referral'
 import { supabase } from './supabase'
 
+/** What to tell someone the database turned away: an account works on two devices (P0004), and a browser that keeps
+ *  no device id cannot be counted (P0003). */
+export function deviceRefusal(code?: string): string | null {
+  if (code === 'P0004') return 'This account is already in use on two other devices. Each account can be used on two devices.'
+  if (code === 'P0003') return 'This browser is blocking site data, so it can’t be recognised. Allow site data for asmrboard.vercel.app, then reload.'
+  return null
+}
+
 export type Profile = { id: string; username: string; display_name: string | null; avatar_url: string | null; onboarded: boolean; guest: boolean }
 
 type AuthState = {
@@ -50,8 +58,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshProfile()
   }, [uid, refreshProfile])
 
-  // a referral link followed before this profile existed is credited once the profile is there
   const profileId = profile?.id
+  // an account can be used on two devices: a third is signed out as soon as it shows up (the database keeps count)
+  useEffect(() => {
+    if (!profileId) return
+    supabase.rpc('claim_device').then(async ({ error }) => {
+      const why = deviceRefusal(error?.code)
+      if (!why) return
+      try { sessionStorage.setItem('asmrboard:signed-out', why) } catch { /* the login page just won't say why */ }
+      await supabase.auth.signOut({ scope: 'local' })
+    })
+  }, [profileId])
+
+  // a referral link followed before this profile existed is credited once the profile is there
   useEffect(() => {
     const ref = profileId && pendingReferral()
     if (ref) supabase.rpc('set_referral', { p_ref: ref }).then(({ error }) => { if (!error) clearReferral() })
