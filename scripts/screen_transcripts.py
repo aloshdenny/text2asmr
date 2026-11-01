@@ -17,12 +17,15 @@ from urllib.parse import quote
 
 import requests
 
-TERMS = re.compile(r"\b(daughter|step ?daughter|little girl|little boy"
+TERMS = re.compile(r"\b(daughter|step ?daughter|step ?son|mom ?son|mother ?son|my son|your son|little girl|little boy"
                    r"|high ?school|middle school|junior high|underage|loli|age ?play|babysitter|babysit|babysitting|ddlg|cgl|abdl"
-                   # 2026-11-01: content_filter.py's 2026-10-22 school settings. Minor-coded terms only (user): incest, step-family
-                   # and sibling roleplay between adults are not blocked.
+                   # 2026-11-01: content_filter.py's 2026-10-22 school settings. Minor-coded terms only (user): sibling, cousin
+                   # and step-family roleplay between adults is not blocked; a son, like a daughter, is.
                    r"|classmates?|homeroom|prom"
                    r")s?\b")  # plurals too: "daughters", "little girls" never matched before
+# parent-child incest: "incest" said within a dozen words of a parent ("mommy confess her incest fantasy for you")
+PARENT_INCEST = re.compile(r"\b(mommy|mom|mum|mother|daddy|dad|father|papa)\b\W+(\w+\W+){0,12}?incest"
+                           r"|incest\w*\W+(\w+\W+){0,12}?(mommy|mom|mum|mother|daddy|dad|father|papa)\b")
 AGES = re.compile(r"\b(1[0-7]|[1-9]|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)[ -]years?[ -]old\b")
 HASHED = re.compile(r"[^/]+/[0-9a-f]{40}\.(m4a|mp3)$")
 
@@ -65,6 +68,7 @@ def main() -> int:
                 r.raise_for_status()
                 t = text_of(r.json())
                 hits = Counter(m.group(0) for m in TERMS.finditer(t)) + Counter(m.group(0) for m in AGES.finditer(t))
+                if PARENT_INCEST.search(t): hits["parent+incest"] += len(PARENT_INCEST.findall(t))
                 return {"rec": f, "repo": repo, "blocked": bool(hits), "hits": dict(hits), "words": len(t.split())}
             except Exception:
                 time.sleep(5 * (attempt + 1))

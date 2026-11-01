@@ -6,7 +6,7 @@ read the uid list this writes.
 
 Titles are the only screen here: ~49k recordings have hash file names and need their metadata screened separately.
 Broad words that are usually innocent in these titles ("student", "young", "son") are not on the list, and neither is
-adult family roleplay (incest, step-family, siblings): only minor-coded terms are.
+adult family roleplay (siblings, cousins, step-family): only minor-coded terms are, parent-child incest among them.
 
   python content_filter.py --corpora aoxo/t2a-mommy aoxo/t2a-daddy --pools D:/t2a/pool* --out D:/t2a/fused/blocked
 Out: <out>_recordings.txt (corpus file paths) and <out>_uids.txt (every pool uid from those recordings)
@@ -15,20 +15,25 @@ from __future__ import annotations
 import argparse, glob, json, re
 from pathlib import Path
 
-BLOCK = re.compile(r"daughter|teen|school|classroom"
-                   r"|(?<![a-z])(ddlg|cgl|mdlb|ddlb|abdl)(?![a-z])|little (one|girl|boy)|age[- ]?play|ageplay|babysit"
+BLOCK = re.compile(r"daughter|step ?son|mom ?son|mother ?son|teen|school|classroom"
+                   # tags often run together ("AgeDdlgIncest"), so the age-play acronyms match inside words too
+                   r"|ddlg|ddlb|mdlg|mdlb|abdl|(?<![a-z])cgl(?![a-z])|little (one|girl|boy)|age[- ]?play|ageplay|babysit"
                    r"|(?<![a-z])(child|kid|kids|minor|underage|loli)(?![a-z])"
                    # 2026-10-22: school settings named without "school" ("Omega classmate in heat")
                    r"|classmates?|homeroom|(?<![a-z])prom(?![a-z])")
-# 2026-11-01 (user): minor-coded only. Incest, step-family, sibling and extended-family words between adults are no
-# longer blocked (added 2026-10-18, step-family since 2026-10-05); "daughter" and "little girl / boy" still are.
+# 2026-11-01 (user): minor-coded only. Incest between adult siblings, cousins, aunts / uncles and step-siblings is no longer
+# blocked (added 2026-10-18), nor are step-parents on their own. Parent-child incest still is, like "daughter" / "son":
+# a title that says incest and names a parent ("Daddy adopts baby girl ... incest", "Mommy's Toy Incest").
+PARENT_INCEST = re.compile(r"^(?=.*incest)(?=.*(dadd?y|(?<![a-z])dad(?![a-z])|father|papa|mommy|(?<![a-z])mom(?![a-z])"
+                           r"|(?<![a-z])mum|mother|baby ?(girl|boy)))")
 
 
 def blocked_title(path: str) -> bool:
     """True when a recording's file name (its title) names a blocked theme."""
     # titles separate words with hyphens, underscores or dots ("Little-Girl"): read them as spaces, or the multi-word
     # terms ("little girl", "big brother") never match (they did not before 2026-10-18)
-    return bool(BLOCK.search(re.sub(r"[-_.]+", " ", path.split("/")[-1].lower())))
+    t = re.sub(r"[-_.]+", " ", path.split("/")[-1].lower())
+    return bool(BLOCK.search(t) or PARENT_INCEST.search(t))
 
 
 def rec_of(uid: str) -> str:

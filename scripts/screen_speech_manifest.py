@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from content_filter import blocked_title
-from screen_transcripts import AGES, TERMS
+from screen_transcripts import AGES, PARENT_INCEST, TERMS
 
 
 def rec_of(uid: str) -> str: return re.sub(r"_\d+$", "", uid)
@@ -38,7 +38,7 @@ def main() -> int:
         rec = rec_of(r["uid"]); text = (r.get("text") or "").lower()
         if rec in blocked: out.append(r["uid"]); why["blocked recording"] += 1
         elif blocked_title(rec): out.append(r["uid"]); why["blocked title"] += 1
-        elif TERMS.search(text) or AGES.search(text): out.append(r["uid"]); why["script"] += 1
+        elif TERMS.search(text) or AGES.search(text) or PARENT_INCEST.search(text): out.append(r["uid"]); why["script"] += 1
     a.out.write_text("".join(u + "\n" for u in out), encoding="utf-8")
     print(f"{len(out)} of {n} speech windows excluded ({100 * len(out) / max(1, n):.1f}%): {dict(why)} -> {a.out}")
     return 0
