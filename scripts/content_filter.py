@@ -15,9 +15,13 @@ from __future__ import annotations
 import argparse, glob, json, re
 from pathlib import Path
 
-BLOCK = re.compile(r"daughter|step ?son|mom ?son|mother ?son|teen|school|classroom"
+BLOCK = re.compile(r"daughter|(step|mom|mommy|mum|mummy|mother|dad|daddy|father) ?sons?(?![a-z])|teen|school|classroom"
                    # tags often run together ("AgeDdlgIncest"), so the age-play acronyms match inside words too
-                   r"|ddlg|ddlb|mdlg|mdlb|abdl|(?<![a-z])cgl(?![a-z])|little (one|girl|boy)|age[- ]?play|ageplay|babysit"
+                   r"|ddlg|ddlb|mdlg|mdlb|mmlg|mmlb|abdl|(?<![a-z])cgl(?![a-z])|little (one|girl|boy|princess)|age[- ]?play|ageplay"
+                   r"|babysit|pubert|pubesc"
+                   # the "[Age]" tag (age play / an age left open), but not "[No Age]", "age gap", "college age", "age 18"
+                   r"|(?<![a-z])(?<!no )(?<!college )(?<!middle )(?<!legal )(?<!same )(?<!of )(?<!the )(?<!your )(?<!my )(?<!her )"
+                   r"(?<!his )(?<!old )(?<!any )age(?![a-z])(?! gap| difference| appropriate| verified| legal| of | 1[89]| [2-9]\d)"
                    r"|(?<![a-z])(child|kid|kids|minor|underage|loli)(?![a-z])"
                    # 2026-10-22: school settings named without "school" ("Omega classmate in heat")
                    r"|classmates?|homeroom|(?<![a-z])prom(?![a-z])")
