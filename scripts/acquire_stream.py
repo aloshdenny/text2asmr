@@ -48,7 +48,7 @@ def main():
             if shutil.disk_usage(a.work).free / 1e9 < a.min_free_gb:
                 flush()   # committing frees our own files; if the drive is still short, something else filled it
                 if shutil.disk_usage(a.work).free / 1e9 < a.min_free_gb: full = True; break
-            # a post's URL carries its title: never fetch one that puts minors, age play or incest in a sexual scene
+            # a post's URL carries its title: never fetch one that puts minors or age play in a sexual scene
             if blocked_title(page.rstrip("/").split("/")[-1].replace("-", " ")):
                 skipped_titles += 1; continue
             try:

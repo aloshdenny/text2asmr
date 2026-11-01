@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Content filter for the T2A generator's data (aoxo/t2a-speech-v2): every speech window that comes from a blocked
 recording (content_filter.py's title screen, screen_transcripts.py's transcript screen) or whose own script names
-minors, school / teen settings, age play or incest -- or a stated age under 18 -- goes on the exclusion list that
+minors, school / teen settings or age play -- or a stated age under 18 -- goes on the exclusion list that
 train_t3_v2.py, dpo_pairs_t3.py and build_voice_bank.py skip by default.
 
   python screen_speech_manifest.py --blocked-recordings D:/t2a/fused/blocked_recordings.txt \\

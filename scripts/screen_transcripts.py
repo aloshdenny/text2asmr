@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Screen recordings whose file names carry no title (soundgasm media hashes) by what is said in them: each one's word
-transcript (<file>.json on the Hub) is read and matched against unambiguous terms for minors, school / teen settings,
-age play and incest, plus stated ages under 18. "mommy" / "daddy" alone do not count: in these corpora they are adult
+transcript (<file>.json on the Hub) is read and matched against unambiguous terms for minors, school / teen settings
+and age play, plus stated ages under 18. "mommy" / "daddy" alone do not count: in these corpora they are adult
 kink terms. A recording with any match is blocked (content_filter.py's lists pick it up).
 
 Transcripts are streamed and parsed in memory (nothing written but the results); Hub 429s back off. Resumable.
@@ -17,13 +17,11 @@ from urllib.parse import quote
 
 import requests
 
-TERMS = re.compile(r"\b(daughter|step ?daughter|step ?son|step ?sister|step ?brother|step ?dad|step ?mom|step ?mum|little girl|little boy"
+TERMS = re.compile(r"\b(daughter|step ?daughter|little girl|little boy"
                    r"|high ?school|middle school|junior high|underage|loli|age ?play|babysitter|babysit|babysitting|ddlg|cgl|abdl"
-                   # 2026-11-01: content_filter.py's 2026-10-18/22 additions, as far as they hold up in speech. Measured on 2,489
-                   # transcripts: these add 3.0% of recordings, mostly sibling roleplay. Bare "sister" (3.1% more, mostly family
-                   # anecdotes and audiobooks), cousin / aunt / uncle / niece / nephew (almost all innocent) and "teen" stay off.
-                   r"|incest(uous)?|mom ?son|mother ?son|my son|your son|step ?(sis|sissy|bro|father|mother|sibling)|siblings?|sis"
-                   r"|(little|big|baby|older|younger) ?(brother|sister|sis)|classmates?|homeroom|prom"
+                   # 2026-11-01: content_filter.py's 2026-10-22 school settings. Minor-coded terms only (user): incest, step-family
+                   # and sibling roleplay between adults are not blocked.
+                   r"|classmates?|homeroom|prom"
                    r")s?\b")  # plurals too: "daughters", "little girls" never matched before
 AGES = re.compile(r"\b(1[0-7]|[1-9]|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen)[ -]years?[ -]old\b")
 HASHED = re.compile(r"[^/]+/[0-9a-f]{40}\.(m4a|mp3)$")
