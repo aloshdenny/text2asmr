@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse, glob, json, re
 from pathlib import Path
 
-BLOCK = re.compile(r"daughter|(step|mom|mommy|mum|mummy|mother|dad|daddy|father) ?sons?(?![a-z])|teen|school|classroom"
+BLOCK = re.compile(r"daughter|(step|mom|mommy|mum|mummy|mother|dad|daddy|father) ?sons?(?!g|ic|ata|ar|net|n?[yi]a|ja)|teen|school|classroom"
                    # tags often run together ("AgeDdlgIncest"), so the age-play acronyms match inside words too
                    r"|ddlg|ddlb|mdlg|mdlb|mmlg|mmlb|abdl|(?<![a-z])cgl(?![a-z])|little (one|girl|boy|princess)|age[- ]?play|ageplay"
                    r"|babysit|pubert|pubesc"
